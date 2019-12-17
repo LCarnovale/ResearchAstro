@@ -1,6 +1,11 @@
+# Analyse mist .eep tracks and plot HR diagrams for varying initial parameters.
+# Author: Leo Carnovale (l.carnovale@student.unsw.edu.au)
+
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
+# import sys
+import tools
+
 
 font = {'weight' : 'normal',
 # 'family' : 'normal',
@@ -49,9 +54,7 @@ def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
             headers = remove_spaces(headers)
 
             EEPs = lines[8][2:-1]
-            if (EEPs[0:4] != "EEPs"): print("EEPs couldn't be found")
-            else:
-                EEPs = [int(x)-1 for x in EEPs[5:].split(' ') if (x and int(x) <= len(data[0]))]
+            EEPs = [int(x)-1 for x in EEPs[5:].split(' ') if (x and int(x) <= len(data[0]))]
 
             inits = remove_spaces(lines[3][1:-1])
             inits += remove_spaces(lines[6][1:-1])
@@ -93,23 +96,61 @@ tracks_M_def = [
 
 
 def get_phase_points(*args):
-    """ Usage:
+    """ 
+    Usage:
         get_phase_points(mass, fe_h)
         get_phase_points(track)
+
     Return an array of Temp-Lum pairs representing the
     positions of evolutionary points along the requested track.
     """
-    if len(args) > 2:
+    if len(args) >= 2:
         track = get_track(*args[:2])
     else:
         track = args[0]
 
-    E_ax = track['EEPs'][:7]
-    if len(E_ax) != 7:
+    E_ax = track['EEPs'][:]
+    if len(E_ax) <= 7:
         print("this one bad: M and Fe/H =", track['initial_mass'], track['[Fe/H]'])
+
     t_ax = track['log_Teff']
     L_ax = track['log_L']
 
+    # Try to find 'local inflexion' points
+    rise = L_ax[1:] - L_ax[:-1]
+    run  = t_ax[1:] - t_ax[:-1]
+    gradient = rise / run
+
+    # Select phase start points of a section (ie the EEP number)
+    # to analyse. 
+    slices_to_check = [slice(3,5), slice(6,4,-1)]
+    for slic in slices_to_check:
+        rise = np.diff(L_ax[E_ax[slic]])[0]
+        run  = np.diff(t_ax[E_ax[slic]])[0]
+        phase_grad = rise / run
+
+        idx, idx_next = E_ax[slic]
+
+        # Cut out the section to be analysed
+        section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
+        diff = section - phase_grad
+        # Negate the diff if the initial slope is positive
+        diff[2] < 0 or diff.__imul__(-1)
+        try:
+            min_idx = tools.getFromTrigger(diff, 0)[0]
+        except Exception as e:
+            plt.plot(diff)
+            plt.show()
+            raise e
+        if (idx > idx_next):
+            # Swap if we are looking at a reversed slice
+            idx, idx_next = idx_next, idx
+
+        # Add the new inflexion point
+        E_ax = np.append(E_ax, [min_idx+idx])
+        # E_ax = [*E_ax[:phase+1], min_idx + idx, *E_ax[phase+1:]]
+
+    
     E_T = t_ax[E_ax]
     E_L = L_ax[E_ax]
 
@@ -148,7 +189,7 @@ def plot_with_phases(tracks, ax, change_key, change_str, color_start=0,
         t_ax = track['log_Teff']
         L_ax = track['log_L']
         xi = E_ax[1] # Start point, will usually correspond with ZAMS phase
-        if abs(track['initial_mass'] - 1) < 1e-3 and track['[Fe/H]'] == 0:
+        if abs(track['initial_mass'] - 1) < 1e-4 and track['[Fe/H]'] == 0:
             _style = sun_style
         else:
             _style = def_style
@@ -156,8 +197,11 @@ def plot_with_phases(tracks, ax, change_key, change_str, color_start=0,
         c = p[0].get_color()
         EP_t_ax = t_ax[E_ax[1:]]
         EP_L_ax = L_ax[E_ax[1:]]
-        phase_points.append(np.array([EP_t_ax, EP_L_ax]).T)
-        ax.plot(EP_t_ax, EP_L_ax, '.', color=c, label=change_str.format(track[change_key]))
+        phase_p = get_phase_points(track)
+        for i, p in enumerate(phase_p[1:]):
+            ax.plot(*p, '.', color=c)#, label=change_str.format(track[change_key]))
+            ax.annotate(i+1, p)
+        # phase_points.append(np.array([EP_t_ax, EP_L_ax]).T)
         ci += 1
 
   
