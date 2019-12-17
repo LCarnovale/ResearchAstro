@@ -1,26 +1,9 @@
-# Analyse mist .eep tracks and plot HR diagrams for varying initial parameters.
-# Author: Leo Carnovale (l.carnovale@student.unsw.edu.au)
-
-import numpy as np
 import matplotlib.pyplot as plt
-# import sys
+import numpy as np
+from scipy.optimize import curve_fit
+from scipy.special import comb
+
 import tools
-
-
-font = {'weight' : 'normal',
-# 'family' : 'normal',
-'size'   : 10}
-plt.rc('font', **font)
-plt.rc('figure', figsize=(12, 8))
-plt.rc('axes', grid=True)
-
-# Surface composition keys:
-X_surf = 'surface_h1'
-Y_surf = 'surface_he4'
-# Core composition keys:
-X_core = 'center_h1'
-Y_core = 'center_he4'
-
 
 
 def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
@@ -84,20 +67,7 @@ def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
     
     
     return out
-
-feh_vals = [.5, .25, 0, -.25, -.5, -.75, -1.0, -1.25, -1.5, -1.75, -2][::-1]
-
-tracks_feh_def = [
-    get_track(1, f) for f in feh_vals
-]
-
-M_vals = [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
-
-tracks_M_def = [
-    get_track(m, 0) for m in M_vals
-]
-
-
+    
 def get_phase_points(*args):
     """ 
     Usage:
@@ -159,71 +129,69 @@ def get_phase_points(*args):
 
     return np.array([E_T, E_L]).T
 
-# all_tracks = [
-#     [
-#         get_track(mass, fe_h) for mass in M_vals
-#     ] for fe_h in feh_vals
-# ]
+def A(row, col, size):
+    """Get the value of the element in a 
+    lower triangular coeffecient matrix
+    for a bezier curve of order `size-1`, ie
+    for a matrix of size `size`."""
+    out = ( 
+        (-1)**(abs(row - col)) * (
+            comb(row, col) * comb(size - 1, row)
+        )
+    )
+    try:
+        out[row < col] = 0
+    except:
+        if row < col: out = 0
 
-# # To use this: all_phase_points[feh val][mass] -> list of points along evolution track
-# all_phase_points = np.array([
-#     [
-#         get_phase_points(track) for track in mass_ax
-#     ] for mass_ax in all_tracks
-# ])
+    return out
 
+generated = {}
+def generate_matrix(N):
+    """ Generate a coeffecient matrix of size `N` for the calculation
+    of Bezier curves. This returns `M` in `B(t) = T(t) * M * P`."""
+    global generated
+    if N in generated:
+        return generated[N]
+    else:
+        rows = np.array([[row for col in range(N)] for row in range(N)])
+        cols = np.array([[col for col in range(N)] for row in range(N)])
+        M = A(rows, cols, N)
+        generated[N] = M
+        return M
+    
 
-def plot_with_phases(tracks, ax, change_key, change_str, color_start=0, 
-        arrow_shape='full', sun_style='--', def_style=':'):
-    """Plot the tracks on a HR diagram,
-    draw arrows connecting evolutionary points on each track,
-    show a legend that will look like:
-        change_str.format(track[change_key])
+    
 
-    for each track.
+def T(t, n):
+    """ Return an array of `[1, t^1, t^2, ..., t^(n-1)]`
+    for every value of `t`. `t` can be scalar or a 1-D array.
     """
+    a = np.array([t**i for i in range(n)]).T
+    size = np.size(t)
+    if size > 1:
+        return a.reshape(size, -1, 1)
+    else:
+        return a.reshape(-1, 1)
 
-    phase_points = []   # Will contain points along evolutionary tracks 
-                        # at corresponding EEP points for each track
+def curve_eval(x, control_points):
+    """ `control_points` should be a N x 2 array.
+    x should be an array like of floats between 0 and 1. """
+    N = len(control_points)
+    M = generate_matrix(N)
+    Tm = T(x, N)
 
-    ci = color_start
-    for track in tracks:
-        E_ax = track['EEPs']
-        t_ax = track['log_Teff']
-        L_ax = track['log_L']
-        xi = E_ax[1] # Start point, will usually correspond with ZAMS phase
-        if abs(track['initial_mass'] - 1) < 1e-4 and track['[Fe/H]'] == 0:
-            _style = sun_style
-        else:
-            _style = def_style
-        p = ax.plot(t_ax[xi:], L_ax[xi:], _style, color="C%d"%(ci%10))
-        c = p[0].get_color()
-        EP_t_ax = t_ax[E_ax[1:]]
-        EP_L_ax = L_ax[E_ax[1:]]
-        phase_p = get_phase_points(track)
-        for i, p in enumerate(phase_p[1:]):
-            ax.plot(*p, '.', color=c)#, label=change_str.format(track[change_key]))
-            ax.annotate(i+1, p)
-        # phase_points.append(np.array([EP_t_ax, EP_L_ax]).T)
-        ci += 1
+    points = (Tm*M).dot(control_points)
+    points = points.sum(axis=1)
+    return points
 
-  
-    ax.legend()
+def plot_curve(control_points):
+    t_ax = np.linspace(0, 1, 100)
+    points = curve_eval(t_ax, control_points)
+    return plt.plot(*points.T)
 
-fig = plt.figure("HR Plot")
-ax1, ax2 = fig.subplots(ncols=2)
-# ax1 = fig.subplots()
-ax1.set_xlabel(r'$\log(T_{eff})$')
-ax1.set_ylabel(r'$\log(L)$')
-ax1.set_title(r"Evolutionary Tracks for stars with varying metalicity, initial mass $1 M_\odot$.")
-ax1.invert_xaxis()
-ax2.set_xlabel(r'$\log(T_{eff})$')
-ax2.set_ylabel(r'$\log(L)$')
-ax2.set_title("Evolutionary Tracks for stars with varying initial mass, initial metalicity 0.0.")
-ax2.invert_xaxis()
+# Fit somehow???????????????
 
+track = get_track(1, 0, 0, 0.4)
 
-plot_with_phases(tracks_feh_def, ax1, '[Fe/H]', '[Fe/H]: {}', arrow_shape='left', color_start=-6)
-plot_with_phases(tracks_M_def, ax2, 'initial_mass', r'${} M_\odot$', arrow_shape='right')
-
-plt.show()
+EEPs = get_phase_points(track)

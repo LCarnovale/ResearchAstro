@@ -2,3 +2,5 @@
 *.txz
 *.tar
 *.pdf
+*.zip
+*.pyc
