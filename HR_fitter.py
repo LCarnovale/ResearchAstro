@@ -6,7 +6,7 @@ import tools
 
 font = {'weight' : 'normal',
 # 'family' : 'normal',
-'size'   : 10}
+'size'   : 15}
 plt.rc('font', **font)
 plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
@@ -101,7 +101,7 @@ def get_phase_points(*args):
 
     # Select phase start points of a section (ie the EEP number)
     # to analyse. 
-    slices_to_check = [slice(3,5), slice(6,4,-1), slice(9, 7, -1)]
+    slices_to_check = [slice(3,5)]
     for slic in slices_to_check:
         rise = np.diff(L_ax[E_ax[slic]])[0]
         run  = np.diff(t_ax[E_ax[slic]])[0]
@@ -113,7 +113,7 @@ def get_phase_points(*args):
         section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
         diff = section - phase_grad
         # Negate the diff if the initial slope is positive
-        diff[2] < 0 or diff.__imul__(-1)
+        diff[1] < 0 or diff.__imul__(-1)
         try:
             min_idx = tools.getFromTrigger(diff, 0)[0]
         except Exception as e:
@@ -128,9 +128,9 @@ def get_phase_points(*args):
         E_ax = np.append(E_ax, [min_idx+idx])
         # E_ax = [*E_ax[:phase+1], min_idx + idx, *E_ax[phase+1:]]
 
-    
-    E_T = t_ax[E_ax]
-    E_L = L_ax[E_ax]
+    track['EEPs'] = np.sort(E_ax)
+    E_T = t_ax[track['EEPs']]
+    E_L = L_ax[track['EEPs']]
 
     return np.array([E_T, E_L]).T
 
@@ -148,11 +148,12 @@ def get_path(track, phase):
 # Each phase and the number of control points to fit with, 
 # and the number of points to split the path into for fitting.
 path_fits = [
-    (1, 10, 500),
+    (1, 22, 100),
     (2, 10, 100),
-    (3, 50, 500),
-    (7, 50, 500),
-    (8, 50, 100)
+    (3, 8, 400),
+    (4, 20, 100),
+    (6, 5, 100),
+    (9, 20, 100)
 ]
 
 tracks = [
@@ -166,24 +167,30 @@ ax = fig.subplots()
 ax.invert_xaxis()
 
 for track in tracks:
+    get_phase_points(track)
     for path_info in path_fits:
         phase, c_count, n_points = path_info
+        print("Fitting phase %d" % phase)
         path = get_path(track, phase)
 
         # Begin with control points evenly spaced out along the path.
         dists = np.linspace(0, 1, c_count)
+        # c_points = fb.interp_path(path[np.array([0, -1])], dists, normalised=True)
         c_points = fb.interp_path(path, dists, normalised=True)
         # Get optimized control points.
-        # plt.plot(*c_points.T, "ro")
         # plt.plot(*path.T)
         # plt.show()
         c_opt = fb.fit_curve(path, c_points, n_points)[0]
+        plt.plot(*c_opt.T, "o", label="Phase %d control points"%phase)
 
         optimized_c_points[phase] = c_opt
     
         ax.plot(*path.T, '.-', label="Phase %d path"%phase)
-        p = fb.plot_curve(c_opt, ax, n_points)
+        p = fb.plot_curve(c_opt, ax, len(path))[0]
+        p.set_label("Phase %d fit"%phase)
+        p.set_linestyle('--')
 
+plt.legend()
 plt.show()
 
 # for track in tracks:

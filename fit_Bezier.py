@@ -155,10 +155,18 @@ def fit_curve(path, control_points, n_points=100):
         dists = get_dist_path_curve(t, path, con_points, n_points)
         return dists
 
+    flat_c = control_points.flatten()
+
+    upper_bound = flat_c.copy()
+    upper_bound[2:-2] = np.inf
+    lower_bound = flat_c.copy() - 1e-6
+    lower_bound[2:-2] = -np.inf
+
     popt, pcov = curve_fit(f,
         np.linspace(0, 1, n_points),
         np.zeros(n_points), 
-        p0=control_points.flatten()
+        p0=flat_c,
+        bounds=(lower_bound, upper_bound)
     )
 
     # popt will have the flattened optimized control points.
@@ -166,9 +174,9 @@ def fit_curve(path, control_points, n_points=100):
 
 
 
-def plot_curve(control_points, ax=None):
+def plot_curve(control_points, ax=None, n_points=100):
     if ax == None: ax = plt.gca()
-    t_ax = np.linspace(0, 1, 100)
+    t_ax = np.linspace(0, 1, n_points)
     points = curve_eval(t_ax, control_points)
     return ax.plot(*points.T)
 
