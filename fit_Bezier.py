@@ -167,31 +167,154 @@ def T(t, n):
     """ Return an array of `[1, t^1, t^2, ..., t^(n-1)]`
     for every value of `t`. `t` can be scalar or a 1-D array.
     """
-    a = np.array([t**i for i in range(n)]).T
+    a = np.array([np.asarray(t)**i for i in range(n)]).T
     size = np.size(t)
     if size > 1:
         return a.reshape(size, -1, 1)
     else:
         return a.reshape(-1, 1)
 
-def curve_eval(x, control_points):
+
+def interp_path(path, distance, normalised=False):
+    """ Interpolate along a given path to find the location of
+    a point at any given distance.
+    `path` should be an array of coordinates,
+    `distance` should be a float value for a distance shorter than 
+    the length of the path, and greater than zero.
+
+    `normalised`: If true, then scale the input distance so that 1.0
+    corresponds to the end of the path.
+
+    Return an array of points for each value in distance.
+    """ 
+
+    # Get a distance array:
+    diffs = path[1:] - path[:-1]         # vector differences
+    
+    dists = np.linalg.norm(diffs, 2, 1)
+    s = np.array([0, *dists.cumsum()])  # Distances of points along the path
+
+    if normalised: distance *= s[-1]
+    
+    if (np.any(distance > s[-1])):
+        raise ValueError(f"Distance must be within the length of the path. \nPath length / given distance: {s[-1]} / {distance}")
+    # map x and y values to distance along the line.
+    # interpolate for the x and y value
+    x_interp = np.interp(distance, s, path[:, 0])
+    y_interp = np.interp(distance, s, path[:, 1])
+
+    return np.array([x_interp, y_interp]).T
+
+def curve_eval(t, control_points):
     """ `control_points` should be a N x 2 array.
-    x should be an array like of floats between 0 and 1. """
+    `t` should be an array like of floats between 0 and 1. 
+    Returns a list of points corresponding to the given t values."""
+    t = np.asarray(t)
     N = len(control_points)
     M = generate_matrix(N)
-    Tm = T(x, N)
+    Tm = T(t, N)
 
     points = (Tm*M).dot(control_points)
     points = points.sum(axis=1)
     return points
 
-def plot_curve(control_points):
+def get_curve_dist_func(control_points, n_points=100):
+    """ Returns a function to approximate the distance (by interpolation)
+    of a point on the curve with a `t` value. ie, returns a function of the form:
+
+        f = get_curve_dist_func(points)
+        f(0.5) -> distance along curve for t = 0.5.
+    
+    `f(1.0)` will give the full length of the curve.
+    """
+    t_ax = np.linspace(0, 1, n_points)
+    curve_points = curve_eval(t_ax, control_points)
+
+    # Get distances
+    diffs = curve_points[1:] - curve_points[:-1]
+    dists = np.linalg.norm(diffs, 2, 1)
+    s = np.array([0, *dists.cumsum()])
+
+    f = lambda t : np.interp(t, t_ax, s)
+
+    return f
+
+def get_dist_path_curve(t, path, control_points, n_points=100):
+    """ Get the distance between corresponding points on
+    a Bezier curve built from the give `control_points`,
+    and on the given `path`.
+
+    `n_points`: number of points to use to interpolate distance
+    along Bezier curve.
+
+    Returns an array of floats the same length as `t`.
+    """
+    # Get distances along curve:
+    dist_f = get_curve_dist_func(control_points, n_points)
+    dists  = dist_f(t) # -> distances of points along the bezier curve.
+    bez_points = curve_eval(t, control_points)
+
+    # Get points along path:
+    norm_dists = dists / dist_f(1.)
+    path_points = interp_path(path, norm_dists, normalised=True)
+
+    # Get differences between points
+    diffs = bez_points - path_points
+    dists = np.linalg.norm(diffs, 2, 1)
+    return dists
+
+def fit_curve(path, control_points, n_points=100):
+    """ Create a function that can be fit to with `scipy`'s `optimize.curve_fit`
+    more easily than `get_dist_path_curve`, and then attempt to fit the curve,
+    and give the optimized control points.
+    
+    Returns the optimized control points and the 
+    flattened parameters' covariance matrix."""
+
+    con_shape = control_points.shape
+    # Create a function to take in the flattened control points.
+    def f(t, *args):
+        con_points = np.asarray(args).reshape(con_shape)
+        dists = get_dist_path_curve(t, path, con_points, n_points)
+        return dists
+
+    popt, pcov = curve_fit(f,
+        np.linspace(0, 1, n_points),
+        np.zeros(n_points), 
+        p0=control_points.flatten()
+    )
+
+    # popt will have the flattened optimized control points.
+    return popt.reshape(con_shape), pcov
+
+
+
+def plot_curve(control_points, ax=None):
+    if ax == None: ax = plt.gca()
     t_ax = np.linspace(0, 1, 100)
     points = curve_eval(t_ax, control_points)
-    return plt.plot(*points.T)
+    return ax.plot(*points.T)
 
 # Fit somehow???????????????
 
 track = get_track(1, 0, 0, 0.4)
 
 EEPs = get_phase_points(track)
+
+path = np.array([np.linspace(1, 3, 100), np.linspace(1, 3, 100)**2]).T
+conpoints = np.array([[1, 1], [3, 1], [3, 3], [1, 3]])
+
+# get_dist_path_curve(np.array([0., 0.1]), path, conpoints)
+
+fig = plt.figure()
+ax1, ax2 = fig.subplots(ncols=2)
+
+ax1.plot(*path.T)
+ax1.plot(*conpoints.T)
+plot_curve(conpoints, ax1)
+
+conpoints_opt = fit_curve(path, conpoints)[0]
+
+ax2.plot(*path.T)
+ax2.plot(*conpoints_opt.T)
+plot_curve(conpoints_opt, ax2)
