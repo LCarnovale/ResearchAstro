@@ -410,8 +410,8 @@ n_arrows_all = {
     4: 10,
     5: 50,
     6: 50,
-    8: 0,
-    9: 0
+    8: 2,
+    9: 2
 }
 
 tracks = tracks_feh_var
@@ -439,18 +439,24 @@ for phase, _, _ in path_fits:
             )[1:]
             contour_step = np.diff(contour_vals)[0]
 
-        last_contour = track[contour_key][domain][0]
+        last_contour = tracks[0][contour_key][domain][0] # Always start at the same contour value
+        contour_points = []
         for idx in np.arange(domain.start, domain.stop):
             # If the contour value is >or< last_contour +or- contour_step
             # then:
             #     interpolate to get the location of the contour point on this line?
             #     or just store this point as a countour point?
             #     yeah that
-            pass 
+            cont_val = track[contour_key][idx]
+            if abs(cont_val - last_contour) >= contour_step:
+                contour_points.append(path[idx - domain.start])
+                last_contour = cont_val
 
-        contour_points = interp_track(track, contour_key, contour_vals, 
-            domain, left=0, right=0, index_axis=True)
-        contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
+        # contour_points = interp_track(track, contour_key, contour_vals, 
+        #     domain, left=0, right=0, index_axis=True)
+        # contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
+        contour_points = np.array(contour_points)
+
         cont_points.append(contour_points)
 
         # if phase == 0:
@@ -461,12 +467,18 @@ for phase, _, _ in path_fits:
         # c_points = optimized_c_points[track][phase]
 
         # points.append(track_fs[i](phase, t_ax)) # Use Bezier curve fits
-        points.append(fb.interp_path(path, t_ax, normalised=True)) # Interpolate over the path
+        # points.append(fb.interp_path(path, t_ax, normalised=True)) # Interpolate over the path
+    max_len = max([len(l) for l in cont_points])
+    for i in range(len(cont_points)):
+        l = len(cont_points[i])
+        cont_points[i] = np.pad(cont_points[i], [(0, max_len-l), (0, 0)], 'constant', constant_values=0)
+    
+    
     
     points = np.array(points)
     cont_points = np.array(cont_points)
 
-    for p in (cont_points, ):    
+    for p in (cont_points, ):
         diff = p[1:] - p[:-1]
         diff[p[1:] == 0.] = 0.
         diff[p[:-1] == 0.] = 0.
