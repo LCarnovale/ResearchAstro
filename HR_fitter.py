@@ -14,11 +14,11 @@ plt.rc('axes', grid=True)
 # class TrackList:
 #     def 
 class TrackSet:
-    _valid_vars = ['mass', 'feh', 'afe', 'v']
+    _valid_vars = ['mass', 'feh', 'v']
     # _var_keys   = ['initial_mass', '[Fe/H]', '[a/Fe]', 'v/vcrit']
     def __init__(self, independent_var, vals, defaults, indep_str=None):
         """Fetch a set of tracks with a varying value for `independent_var`,
-        which must be either 'mass', 'feh', 'afe', or 'v'.
+        which must be either 'mass', 'feh', or 'v'.
         `vals` should be the values that the independent variable should take,
         and defaults should contain a value for all of the above parameters 
         (in that order), and will determine the values of the fixed parameters.
@@ -31,7 +31,7 @@ class TrackSet:
 
         Each of the defaults other than the independent variable can be accessed
         by: 
-            >>> ts = TrackSet('feh', [1, 2, 3], (1, None, 2, 3))
+            >>> ts = TrackSet('feh', [1, 2, 3], (1, None, 2))
             >>> ts.mass
             1
         Accessing the independent variable will return the list of values
@@ -103,11 +103,10 @@ class TrackSet:
         
 
 
-def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
+def get_track(mass, fe_h, v_vcrit=0):
     """ Fetch the evolutionary track of a star.
     'Mass' is the initial mass, in solar masses.
     'fe_h' is the metalicity of the star, 0 for a sun like star.
-    'a_fe' is the alpha to iron abundance, 0 for a sun like star.
     'v_vcrit' is the rotation of the star as a ratio of the critical rotation.
     MIST only includes rotation values of 0 and 0.4.
 
@@ -118,10 +117,8 @@ def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
     
     feh = (fe_h<0 and 'm') or (fe_h>=0 and 'p')
     feh = f'{feh}{abs(fe_h):.02f}'
-    afe = (a_fe<0 and 'm') or (a_fe>=0 and 'p')
-    afe = f'{afe}{abs(a_fe):.01f}'
 
-    fname = f"MistTracks/MIST_v1.2_feh_{feh}_afe_{afe}_vvcrit{v_vcrit:.01f}_EEPS/{m_str}M.track.eep"
+    fname = f"MistTracks/MIST_v1.2_feh_{feh}_afe_p0.0_vvcrit{v_vcrit:.01f}_EEPS/{m_str}M.track.eep"
     print(f"Fetching: {fname}")
     try:
         data = np.genfromtxt(fname)    # The table data.
@@ -146,7 +143,6 @@ def get_track(mass, fe_h, a_fe=0, v_vcrit=0):
         print("No track found for:")
         print("mass:", mass)
         print("fe_h:", fe_h)
-        print("a_fe:", a_fe)
         print("v_vcrit:", v_vcrit)
         return None
     else:
@@ -318,17 +314,17 @@ def get_track_fits(track):
 
 tracks_m_var = TrackSet('mass',
     [.8, .9, 1., 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2],
-    (None, 0, 0, 0), indep_str=r"{} $M_\odot$"
+    (None, 0, 0), indep_str=r"{} $M_\odot$"
 )
 
 tracks_feh_var = TrackSet('feh', 
     [-2.0, -1.75, -1.5, -1.25, -1.0, 
      -0.75, -0.5, -0.25, 0.0, 0.25, 0.5], 
-     (1, None, 0, 0), indep_str="[Fe/H]: {}"
+     (1, None, 0), indep_str="[Fe/H]: {}"
 )
 
 tracks_v_var = TrackSet('v',
-    [0, 0.4], (1, 0, 0, None))
+    [0, 0.4], (1, 0, None))
 
 
 # for track in tracks:
@@ -364,7 +360,7 @@ n_arrows_all = {
     8: 0
 }
 
-tracks = tracks_feh_var
+tracks = tracks_v_var
 tracks.init()
 
 for phase, _, _ in path_fits:
