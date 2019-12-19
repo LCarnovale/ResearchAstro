@@ -65,13 +65,15 @@ def interp_path(path, distance, normalised=False):
     Return an array of points for each value in distance.
     """ 
 
+    distance = np.asarray(distance)
+
     # Get a distance array:
     diffs = path[1:] - path[:-1]         # vector differences
     
-    dists = np.linalg.norm(diffs, 2, 1)
-    s = np.array([0, *dists.cumsum()])  # Distances of points along the path
+    dists = np.linalg.norm(diffs, 2, 1)  # distance from point i to i+1
+    s = np.array([0, *dists.cumsum()])   # Distances of points along the path
 
-    if normalised: distance *= s[-1]
+    if normalised: s /= s[-1]
     
     if (np.any(distance > s[-1])):
         raise ValueError(f"Distance must be within the length of the path. \nPath length / given distance: {s[-1]} / {distance}")
@@ -86,7 +88,7 @@ def curve_eval(t, control_points):
     """ `control_points` should be a N x 2 array.
     `t` should be an array like of floats between 0 and 1. 
     Returns a list of points corresponding to the given t values."""
-    t = np.asarray(t)
+    t = np.asarray(t).reshape(-1, 1)
     N = len(control_points)
     M = generate_matrix(N)
     Tm = T(t, N)
@@ -103,6 +105,9 @@ def get_curve_dist_func(control_points, n_points=100):
         f(0.5) -> distance along curve for t = 0.5.
     
     `f(1.0)` will give the full length of the curve.
+
+    `n_points`: default 100, numper of divisions of bezier curve to use
+    for interpolation.
     """
     t_ax = np.linspace(0, 1, n_points)
     curve_points = curve_eval(t_ax, control_points)
@@ -115,6 +120,24 @@ def get_curve_dist_func(control_points, n_points=100):
     f = lambda t : np.interp(t, t_ax, s)
 
     return f
+
+def get_inverse_dist_func(control_points, n_points=100):
+    """ Returns a function to convert a normalised distance
+    into a `t` value. Essentially the inverse of the function
+    returned by `get_curve_dist_func`, except that both the 
+    domain and range of the returned function is [0, 1].
+    """
+    t_ax = np.linspace(0, 1, n_points)
+    curve_points = curve_eval(t_ax, control_points)
+
+    diffs = curve_points[1:] - curve_points[:-1]
+    dists = np.linalg.norm(diffs, 2, 1)
+    s = np.array([0, *dists.cumsum()])
+
+    f = lambda t : np.interp(t, s, t_ax)
+
+    return f
+
 
 def get_dist_path_curve(t, path, control_points, n_points=100):
     """ Get the distance between corresponding points on
@@ -159,7 +182,7 @@ def fit_curve(path, control_points, n_points=100):
 
     upper_bound = flat_c.copy()
     upper_bound[2:-2] = np.inf
-    lower_bound = flat_c.copy() - 1e-6
+    lower_bound = flat_c - 1e-6
     lower_bound[2:-2] = -np.inf
 
     popt, pcov = curve_fit(f,
