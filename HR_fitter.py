@@ -161,19 +161,31 @@ def get_track(mass, fe_h, v_vcrit=0):
     
     return out
 
-def interp_track(track, key, value, domain=None, left=None, right=None):
+def interp_track(track, key, value, domain=None, left=None, right=None, index_axis=False):
     """ Return a dict matching the keys of the given track with all values
     interpolated to correspond with the given `value` for the given `key`.
 
     Provide a slice to interpolate over with `domain` to avoid bugs due to
     some columns not being strictly increasing. Default is `slice(None)`,
     ie the whole column will be used for interpolation.
+
+    `index_axis` default False, if True then an index of the value in the track
+    is found by interpolation, and then the other fields are interpolated with
+    the indexes (0, 1, 2, ...) as the x axis, and the found index as the value. 
+    When False, the values of the key field are used as the x axis.
     """
 
     if domain == None:
         domain = slice(None)
 
-    x_ax = track[key][domain]
+    if index_axis:
+        y_ax = np.arange(len(track[key]))
+        idx = np.interp(value, track[key][domain], y_ax[domain])
+        x_ax = y_ax
+        value = idx
+        domain = slice(None)
+    else:
+        x_ax = track[key][domain]
 
     out = dict()
     for k in track:
@@ -187,63 +199,105 @@ def interp_track(track, key, value, domain=None, left=None, right=None):
                 out[k] = track[k]
     return out
     
-def get_phase_points(*args):
+def analyse_track(*args):
     """ 
     Usage:
-        get_phase_points(mass, fe_h)
-        get_phase_points(track)
+        analyse_track(mass, fe_h)
+        analyse_track(track)
 
-    Return an array of Temp-Lum pairs representing the
-    positions of evolutionary points along the requested track.
+    Add some useful fields to the track like radius of curvature,
+    path length, tangents, gradients etc.
+
     """
     if len(args) >= 2:
         track = get_track(*args[:2])
     else:
         track = args[0]
 
+
+    # Get distance array:
+    T_ax = track['log_Teff']
+    L_ax = track['log_L']
+    points = np.array([T_ax, L_ax]).T
+    dists = fb.get_dist_array(points)
+    # Get tangent and curvature arrays:
+    dT = np.gradient(T_ax, dists)
+    dL = np.gradient(L_ax, dists)
+
+    d2T = np.gradient(dT, dists)
+    d2L = np.gradient(dL, dists)
+    
+    tangent = np.array([dT, dL]).T
+    curvature = np.array([d2T, d2L]).T
+    inv_radius = np.linalg.norm(curvature, 2, 1)
+
+    # Get points of minimum curvature
+    track['curv_inv_rad'] = inv_radius
+    track['tangent'] = tangent
+    track['path_len'] = dists
+
+    track['avg_density'] = track['star_mass'] / (10**(3*track['log_R']))
+
     E_ax = track['EEPs'][:]
+
+    
     if len(E_ax) <= 7:
         print("this one bad: M and Fe/H =", track['initial_mass'], track['[Fe/H]'])
 
-    t_ax = track['log_Teff']
-    L_ax = track['log_L']
-
     # Try to find 'local inflexion' points
     rise = L_ax[1:] - L_ax[:-1]
-    run  = t_ax[1:] - t_ax[:-1]
+    run  = T_ax[1:] - T_ax[:-1]
     gradient = rise / run
+
+
 
     # Select phase start points of a section (ie the EEP number)
     # to analyse. 
-    slices_to_check = [slice(3,5)]
+    slices_to_check = []#slice(3,5)]
     for slic in slices_to_check:
-        rise = np.diff(L_ax[E_ax[slic]])[0]
-        run  = np.diff(t_ax[E_ax[slic]])[0]
-        phase_grad = rise / run
+        start, end = E_ax[slic]
+        start += 25 # Fudge fix
+        domain = slice(start, end)
+        min_curv = np.argmax(inv_radius[start:end])
+        print(track['[Fe/H]'], "sharpest point at", points[min_curv + start])
+        print("Curvature inverse:", inv_radius[min_curv + start])
+        print(f"Index: {min_curv} + {start} = {min_curv + start}, end of slice: {end}")
+        E_ax = np.append(E_ax, [min_curv+start])
+        # rise = np.diff(L_ax[E_ax[slic]])[0]
+        # run  = np.diff(T_ax[E_ax[slic]])[0]
+        # phase_grad = rise / run
 
-        idx, idx_next = E_ax[slic]
+        # idx, idx_next = E_ax[slic]
 
-        # Cut out the section to be analysed
-        section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
-        diff = section - phase_grad
-        # Negate the diff if the initial slope is positive
-        diff[1] < 0 or diff.__imul__(-1)
-        try:
-            min_idx = tools.getFromTrigger(diff, 0)[0]
-        except Exception as e:
-            plt.plot(diff)
-            plt.show()
-            raise e
-        if (idx > idx_next):
-            # Swap if we are looking at a reversed slice
-            idx, idx_next = idx_next, idx
+        # # Cut out the section to be analysed
+        # section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
+        # diff = section - phase_grad
+        # # Negate the diff if the initial slope is positive
+        # diff[1] < 0 or diff.__imul__(-1)
+        # try:
+        #     min_idx = tools.getFromTrigger(diff, 0)[0]
+        # except Exception as e:
+        #     plt.plot(diff)
+        #     plt.show()
+        #     raise e
+        # if (idx > idx_next):
+        #     # Swap if we are looking at a reversed slice
+        #     idx, idx_next = idx_next, idx
 
-        # Add the new inflexion point
-        E_ax = np.append(E_ax, [min_idx+idx])
+        # # Add the new inflexion point
+        # E_ax = np.append(E_ax, [min_idx+idx])
         # E_ax = [*E_ax[:phase+1], min_idx + idx, *E_ax[phase+1:]]
 
+    # Calculate normalised path length
+
+
     track['EEPs'] = np.sort(E_ax)
-    E_T = t_ax[track['EEPs']]
+
+    divisions = len(E_ax)
+    # for p in track['EEPs']:
+        # Get the path length array between here and the next point
+    
+    E_T = T_ax[track['EEPs']]
     E_L = L_ax[track['EEPs']]
 
     return np.array([E_T, E_L]).T
@@ -324,11 +378,8 @@ tracks_feh_var = TrackSet('feh',
 )
 
 tracks_v_var = TrackSet('v',
-    [0, 0.4], (1, 0, None))
+    [0, 0.4], (0.8, 0, None))
 
-
-# for track in tracks:
-#     get_phase_points(track)
 
 # Each phase and the number of control points to fit with, 
 # and the number of points to split the path into for fitting.
@@ -350,18 +401,24 @@ ax.invert_xaxis()
 # track_fs = [get_track_fits(track) for track in tracks]
 
 
-contour_key = 'log_center_Rho'
+contour_key = 'avg_density'
 
 n_arrows_all = {
     1: 5,
     2: 10,
-    3: 20,
+    3: 10,
+    4: 10,
     5: 50,
-    8: 0
+    6: 50,
+    8: 0,
+    9: 0
 }
 
-tracks = tracks_v_var
+tracks = tracks_feh_var
 tracks.init()
+
+for track in tracks:
+    analyse_track(track)
 
 for phase, _, _ in path_fits:
     # plot the lines
@@ -377,11 +434,22 @@ for phase, _, _ in path_fits:
             # start_row = interp_track(track, 'log_Teff', path[0][0], domain)
             # end_row   = interp_track(track, 'log_Teff', path[-1][0], domain)
             contour_vals = np.linspace(
-                min(contour_range)*.9, 1.1*max(contour_range), 
+                min(contour_range), max(contour_range), 
                 n_arrows+1, endpoint=False
             )[1:]
+            contour_step = np.diff(contour_vals)[0]
 
-        contour_points = interp_track(track, contour_key, contour_vals, domain, left=0, right=0)
+        last_contour = track[contour_key][domain][0]
+        for idx in np.arange(domain.start, domain.stop):
+            # If the contour value is >or< last_contour +or- contour_step
+            # then:
+            #     interpolate to get the location of the contour point on this line?
+            #     or just store this point as a countour point?
+            #     yeah that
+            pass 
+
+        contour_points = interp_track(track, contour_key, contour_vals, 
+            domain, left=0, right=0, index_axis=True)
         contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
         cont_points.append(contour_points)
 

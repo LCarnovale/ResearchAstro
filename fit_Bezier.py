@@ -52,6 +52,12 @@ def T(t, n):
     else:
         return a.reshape(-1, 1)
 
+def get_dist_array(points):
+    diffs = points[1:] - points[:-1]
+    dists = np.linalg.norm(diffs, 2, 1)
+    s = np.array([0, *dists.cumsum()])
+    return s
+
 def interp_path(path, distance, normalised=False):
     """ Interpolate along a given path to find the location of
     a point at any given distance.
@@ -68,10 +74,11 @@ def interp_path(path, distance, normalised=False):
     distance = np.asarray(distance)
 
     # Get a distance array:
-    diffs = path[1:] - path[:-1]         # vector differences
+    # diffs = path[1:] - path[:-1]         # vector differences
     
-    dists = np.linalg.norm(diffs, 2, 1)  # distance from point i to i+1
-    s = np.array([0, *dists.cumsum()])   # Distances of points along the path
+    # dists = np.linalg.norm(diffs, 2, 1)  # distance from point i to i+1
+    # s = np.array([0, *dists.cumsum()])   # Distances of points along the path
+    s = get_dist_array(path)
 
     if normalised: s /= s[-1]
     
@@ -113,9 +120,10 @@ def get_curve_dist_func(control_points, n_points=100):
     curve_points = curve_eval(t_ax, control_points)
 
     # Get distances
-    diffs = curve_points[1:] - curve_points[:-1]
-    dists = np.linalg.norm(diffs, 2, 1)
-    s = np.array([0, *dists.cumsum()])
+    # diffs = curve_points[1:] - curve_points[:-1]
+    # dists = np.linalg.norm(diffs, 2, 1)
+    # s = np.array([0, *dists.cumsum()])
+    s = get_dist_array(curve_points)
 
     f = lambda t : np.interp(t, t_ax, s)
 
@@ -130,9 +138,10 @@ def get_inverse_dist_func(control_points, n_points=100):
     t_ax = np.linspace(0, 1, n_points)
     curve_points = curve_eval(t_ax, control_points)
 
-    diffs = curve_points[1:] - curve_points[:-1]
-    dists = np.linalg.norm(diffs, 2, 1)
-    s = np.array([0, *dists.cumsum()])
+    # diffs = curve_points[1:] - curve_points[:-1]
+    # dists = np.linalg.norm(diffs, 2, 1)
+    # s = np.array([0, *dists.cumsum()])
+    s = get_dist_array(curve_points)
 
     f = lambda t : np.interp(t, s, t_ax)
 
