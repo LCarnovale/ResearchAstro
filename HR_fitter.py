@@ -11,6 +11,8 @@ plt.rc('font', **font)
 plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
 
+# class TrackList:
+#     def 
 class TrackSet:
     _valid_vars = ['mass', 'feh', 'afe', 'v']
     # _var_keys   = ['initial_mass', '[Fe/H]', '[a/Fe]', 'v/vcrit']
@@ -22,6 +24,10 @@ class TrackSet:
         (in that order), and will determine the values of the fixed parameters.
         The value in the defaults corresponding to the independent variable will
         be ignored.
+
+        Instantiating objects of this class does not fetch the tracks immediately.
+        To do so, call init() on the newly created object. This is simply so that
+        many track sets can be established quickly, and loaded when needed.
 
         Each of the defaults other than the independent variable can be accessed
         by: 
@@ -49,14 +55,14 @@ class TrackSet:
         
         # Get the tracks
         self._tracks = []
-        idx = self._valid_vars.index(independent_var)
-        for v in vals:
-            args = [i for i in defaults] # get a copy of defaults
-            args[idx] = v
-            self._tracks.append(get_track(*args))
+        # for v in vals:
+        #     args = [i for i in defaults] # get a copy of defaults
+        #     args[idx] = v
+        #     self._tracks.append(get_track(*args))
         
         self.indep_var = independent_var
         self.vals = vals
+        self.defaults = defaults
         
         for var, val in zip(self._valid_vars, defaults):
             if var == independent_var:
@@ -69,6 +75,15 @@ class TrackSet:
 
     def __getitem__(self, var):
         return self._tracks.__getitem__(var)
+
+    def init(self):
+        """ Fetch all the tracks. You need to call this to be able
+        to do anything with this object."""
+        idx = self._valid_vars.index(self.indep_var)
+        for v in self.vals:
+            args = [i for i in self.defaults] # get a copy of defaults
+            args[idx] = v
+            self._tracks.append(get_track(*args))
 
     def strfmt(self, arg):
         """
@@ -248,16 +263,7 @@ def get_path(track, phase):
 
     return path_full[EEPs[phase]:EEPs[phase + 1]]
     
-# Each phase and the number of control points to fit with, 
-# and the number of points to split the path into for fitting.
-path_fits = [
-    (1, 22, 100),
-    (2, 10, 100),
-    (3, 8, 400),
-    # (4, 20, 100),
-    (5, 5, 100),
-    (8, 20, 100)
-]
+
 
 def get_track_fits(track):
     """ Return a function that will give the approximated
@@ -308,58 +314,36 @@ def get_track_fits(track):
         
     return func
 
-        
 
-# tracks_mass_var = [
-#     get_track(0.8, 0),
-#     get_track(0.9, 0),
-#     get_track(1, 0), # sun
-#     get_track(1.1, 0),
-#     get_track(1.2, 0),
-#     get_track(1.3, 0),
-#     get_track(1.4, 0),
-#     get_track(1.5, 0),
-#     get_track(1.6, 0),
-#     # get_track(1.2, 0),
-#     # get_track(1.3, 0),
-# ]
-
-# tracks = [
-#     # get_track(1, -4.0),
-#     # get_track(1, -3.75),
-#     # get_track(1, -3.5),
-#     # get_track(1, -3.25),
-#     # get_track(1, -3.0),
-#     # get_track(1, -2.75),
-#     # get_track(1, -2.5),
-#     # get_track(1, -2.25),
-#     get_track(1, -2.0),
-#     get_track(1, -1.75),
-#     get_track(1, -1.5),
-#     get_track(1, -1.25),
-#     get_track(1, -1.0),
-#     get_track(1, -0.75),
-#     get_track(1, -0.5),
-#     get_track(1, -0.25),
-#     get_track(1, 0.0),
-#     get_track(1, 0.25),
-#     get_track(1, 0.5)
-# ]
 
 tracks_m_var = TrackSet('mass',
     [.8, .9, 1., 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2],
     (None, 0, 0, 0), indep_str=r"{} $M_\odot$"
 )
 
-# tracks_feh_var = TrackSet('feh', 
-#     [-2.0, -1.75, -1.5, -1.25, -1.0, 
-#      -0.75, -0.5, -0.25, 0.0, 0.25, 0.5], 
-#      (1, None, 0, 0), indep_str="[Fe/H]: {}"
-# )
+tracks_feh_var = TrackSet('feh', 
+    [-2.0, -1.75, -1.5, -1.25, -1.0, 
+     -0.75, -0.5, -0.25, 0.0, 0.25, 0.5], 
+     (1, None, 0, 0), indep_str="[Fe/H]: {}"
+)
+
+tracks_v_var = TrackSet('v',
+    [0, 0.4], (1, 0, 0, None))
+
 
 # for track in tracks:
 #     get_phase_points(track)
 
+# Each phase and the number of control points to fit with, 
+# and the number of points to split the path into for fitting.
+path_fits = [
+    (1, 22, 100),
+    (2, 10, 100),
+    (3, 8, 400),
+    # (4, 20, 100),
+    (5, 5, 100),
+    (8, 20, 100)
+]
 
 optimized_c_points = {}
 
@@ -376,11 +360,12 @@ n_arrows_all = {
     1: 5,
     2: 10,
     3: 20,
-    5: 25,
+    5: 50,
     8: 0
 }
 
-tracks = tracks_m_var
+tracks = tracks_feh_var
+tracks.init()
 
 for phase, _, _ in path_fits:
     # plot the lines
