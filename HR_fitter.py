@@ -6,13 +6,11 @@ import tools
 
 font = {'weight' : 'normal',
 # 'family' : 'normal',
-'size'   : 15}
+'size'   : 25}
 plt.rc('font', **font)
 plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
 
-# class TrackList:
-#     def 
 class TrackSet:
     _valid_vars = ['mass', 'feh', 'v']
     # _var_keys   = ['initial_mass', '[Fe/H]', '[a/Fe]', 'v/vcrit']
@@ -99,9 +97,83 @@ class TrackSet:
 
 
 
+def contour_1d(data, contour_step, start=None, interp_index=True):
+    """ Returns a list of interpolated indexes, and 
+    step distances from the start contour, for locations of 
+    values separated by `contour_step` in `data`. 
 
-        
+    A base or start contour value can be set with `start`
+    (by default the first value in  `data`)
 
+    Eg:
+        >>> data = [2, 3, 4, 5, 6, 7, 8, 8.5, 9, 10]
+        >>> contour_1d(data, 2, start=6)
+        [(0, -2), (2, -1), (4, 0), (6, 1), (9, 2)]
+    If the exact contour is not in data, the index is interpolated:
+        >>> data = [2, 3, 4, 5, 6, 7, 8, 8.5, 9, 11]
+        >>> contour_1d(data, 2, start=6)
+        [(0, -2), (2, -1), (4, 0), (6, 1), (8.5, 2)]
+    This behaviour can be disabled with `interp_index=False`, which
+    is the same as calling `int(x) + 1` on all the found indexes.
+    """
+    
+    if start == None:
+        start = data[0]
+    
+    vals = data - start
+
+    steps = vals // contour_step
+
+    mask = steps[1:] != steps[:-1] 
+    # mask indicates the intervals between data points
+    # where contours lie.
+    cont_intervals = np.flatnonzero(mask)
+    # for each i in cont_intervals, vals[i]->vals[i+1]
+    # is an interval with contours on it.
+    out = []
+    if not vals[0] % contour_step:
+        out.append([0, steps[0]])
+
+    for interval in cont_intervals:
+        i0, i1 = interval, interval+1
+        # Get the data values at each end
+        f0, f1 = vals[i0:i0+2]
+        # Get the values of contours within the relevant steps
+        order = int(np.sign(f1 - f0))
+        s0, s1 = steps[i0:i0+2]
+        s_ax = np.linspace(*[s1, s0][::order], abs(s1-s0), endpoint=False)
+        c_ax = s_ax * contour_step
+        # interpolate to get indexes
+        idxs = np.interp(c_ax, [f0, f1][::order], [i0, i1][::order],
+            left=None, right=None)
+
+        print(f"Interval: {i0}-{i1}, data: {f0}, {f1}, order: {order}")
+        print(f"steps: {s0}-{s1}, s_ax: {s_ax}, idxs: {idxs}")
+
+        for i, s in zip(idxs, s_ax):
+            if i is None: continue
+            out.append([i, s])
+            
+    return out
+    
+data = np.arange(10)-4
+print(contour_1d(data, 3, start=2))
+
+xax = np.linspace(-5, 5, 100)
+yax = xax**2
+
+conts = contour_1d(yax, 5, start=0)
+conts = np.array(conts)
+plt.plot(xax, yax, '.-')
+c_x_ax = np.interp(conts[:, 0], np.arange(len(xax)), xax)
+c_y_ax = np.interp(conts[:, 0], np.arange(len(xax)), yax)
+c_step_ax = conts[:, 1] * 5
+plt.plot(c_x_ax, c_y_ax, "rx")
+plt.plot(c_x_ax, c_step_ax, "k+")
+plt.legend(['data', 'interped y', 'stepped y'])
+plt.show()
+
+raise Exception()
 
 def get_track(mass, fe_h, v_vcrit=0):
     """ Fetch the evolutionary track of a star.
@@ -404,14 +476,14 @@ ax.invert_xaxis()
 contour_key = 'avg_density'
 
 n_arrows_all = {
-    1: 5,
-    2: 10,
-    3: 10,
-    4: 10,
-    5: 50,
-    6: 50,
-    8: 2,
-    9: 2
+    1: 50,
+    # 2: 10,
+    # 3: 10,
+    # 4: 10,
+    # 5: 50,
+    # 6: 50,
+    # 8: 2,
+    # 9: 2
 }
 
 tracks = tracks_feh_var
@@ -427,8 +499,10 @@ for phase, _, _ in path_fits:
     n_arrows = n_arrows_all[phase]
     t_ax = np.linspace(0, 1, n_arrows)
     for i, track in enumerate(tracks):
-        path = get_path(track, phase)
+        # path = get_path(track, phase)
+        path = np.array([track['log_Teff'], track['log_L']]).T
         domain = slice(*track['EEPs'][phase:phase + 2])
+        # domain = slice(track))
         if i == 0:
             contour_range = track[contour_key][domain]
             # start_row = interp_track(track, 'log_Teff', path[0][0], domain)
@@ -436,7 +510,7 @@ for phase, _, _ in path_fits:
             contour_vals = np.linspace(
                 min(contour_range), max(contour_range), 
                 n_arrows+1, endpoint=False
-            )[1:]
+            )
             contour_step = np.diff(contour_vals)[0]
 
         last_contour = tracks[0][contour_key][domain][0] # Always start at the same contour value
@@ -448,9 +522,15 @@ for phase, _, _ in path_fits:
             #     or just store this point as a countour point?
             #     yeah that
             cont_val = track[contour_key][idx]
-            if abs(cont_val - last_contour) >= contour_step:
-                contour_points.append(path[idx - domain.start])
+
+            if (abs(cont_val - last_contour) >= contour_step):
+                interped_row = interp_track(track, contour_key, 
+                    contour_vals, domain=slice(idx-1, idx+1), left=0, right=0)
+                interped_points = np.array([interped_row['log_Teff'], interped_row['log_L']]).T
+                # if np.any(interped_points != 0):
+                contour_points.append(interped_points)
                 last_contour = cont_val
+
 
         # contour_points = interp_track(track, contour_key, contour_vals, 
         #     domain, left=0, right=0, index_axis=True)
@@ -471,7 +551,7 @@ for phase, _, _ in path_fits:
     max_len = max([len(l) for l in cont_points])
     for i in range(len(cont_points)):
         l = len(cont_points[i])
-        cont_points[i] = np.pad(cont_points[i], [(0, max_len-l), (0, 0)], 'constant', constant_values=0)
+        cont_points[i] = np.pad(cont_points[i], [(0, max_len-l), (0, 0), (0, 0)], 'constant', constant_values=0)
     
     
     
@@ -483,7 +563,7 @@ for phase, _, _ in path_fits:
         diff[p[1:] == 0.] = 0.
         diff[p[:-1] == 0.] = 0.
         plt.quiver(
-            p[:-1,:,0], p[:-1,:,1], diff[:,:,0], diff[:,:,1], 
+            p[:-1,:,:,0].flatten(), p[:-1,:,:,1].flatten(), diff[:,:,:,0].flatten(), diff[:,:,:,1].flatten(), 
             scale=1, angles='xy', scale_units='xy', color='gray',#"C%d"%(phase%10),
             width=0.001, label=None#"Phase %d change"%phase  
         )
