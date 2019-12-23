@@ -97,7 +97,7 @@ class TrackSet:
 
 
 
-def contour_1d(data, contour_step, start=None, interp_index=True):
+def contour_1d(data, contour_step, start=None):
     """ Returns a list of interpolated indexes, and 
     step distances from the start contour, for locations of 
     values separated by `contour_step` in `data`. 
@@ -113,8 +113,6 @@ def contour_1d(data, contour_step, start=None, interp_index=True):
         >>> data = [2, 3, 4, 5, 6, 7, 8, 8.5, 9, 11]
         >>> contour_1d(data, 2, start=6)
         [(0, -2), (2, -1), (4, 0), (6, 1), (8.5, 2)]
-    This behaviour can be disabled with `interp_index=False`, which
-    is the same as calling `int(x) + 1` on all the found indexes.
     """
     
     if start == None:
@@ -147,33 +145,30 @@ def contour_1d(data, contour_step, start=None, interp_index=True):
         idxs = np.interp(c_ax, [f0, f1][::order], [i0, i1][::order],
             left=None, right=None)
 
-        print(f"Interval: {i0}-{i1}, data: {f0}, {f1}, order: {order}")
-        print(f"steps: {s0}-{s1}, s_ax: {s_ax}, idxs: {idxs}")
-
         for i, s in zip(idxs, s_ax):
             if i is None: continue
             out.append([i, s])
             
-    return out
+    return np.array(out)
     
-data = np.arange(10)-4
-print(contour_1d(data, 3, start=2))
+# data = np.arange(10)-4
+# print(contour_1d(data, 3, start=2))
 
-xax = np.linspace(-5, 5, 100)
-yax = xax**2
+# xax = np.linspace(-5, 5, 100)
+# yax = xax**2
 
-conts = contour_1d(yax, 5, start=0)
-conts = np.array(conts)
-plt.plot(xax, yax, '.-')
-c_x_ax = np.interp(conts[:, 0], np.arange(len(xax)), xax)
-c_y_ax = np.interp(conts[:, 0], np.arange(len(xax)), yax)
-c_step_ax = conts[:, 1] * 5
-plt.plot(c_x_ax, c_y_ax, "rx")
-plt.plot(c_x_ax, c_step_ax, "k+")
-plt.legend(['data', 'interped y', 'stepped y'])
-plt.show()
+# conts = contour_1d(yax, 5, start=0)
+# conts = np.array(conts)
+# plt.plot(xax, yax, '.-')
+# c_x_ax = np.interp(conts[:, 0], np.arange(len(xax)), xax)
+# c_y_ax = np.interp(conts[:, 0], np.arange(len(xax)), yax)
+# c_step_ax = conts[:, 1] * 5
+# plt.plot(c_x_ax, c_y_ax, "rx")
+# plt.plot(c_x_ax, c_step_ax, "k+")
+# plt.legend(['data', 'interped y', 'stepped y'])
+# plt.show()
 
-raise Exception()
+# raise Exception()
 
 def get_track(mass, fe_h, v_vcrit=0):
     """ Fetch the evolutionary track of a star.
@@ -309,6 +304,8 @@ def analyse_track(*args):
     track['path_len'] = dists
 
     track['avg_density'] = track['star_mass'] / (10**(3*track['log_R']))
+
+    track['idx'] = np.arange(len(dists))
 
     E_ax = track['EEPs'][:]
 
@@ -470,23 +467,20 @@ fig = plt.figure("Fitting bezier curves to HR tracks")
 ax = fig.subplots()
 ax.invert_xaxis()
 
-# track_fs = [get_track_fits(track) for track in tracks]
-
-
 contour_key = 'avg_density'
 
 n_arrows_all = {
-    1: 50,
-    # 2: 10,
-    # 3: 10,
-    # 4: 10,
-    # 5: 50,
-    # 6: 50,
-    # 8: 2,
-    # 9: 2
+    1: 5,
+    2: 10,
+    3: 10,
+    4: 10,
+    5: 10,
+    6: 10,
+    8: 2,
+    9: 2
 }
 
-tracks = tracks_feh_var
+tracks = tracks_m_var
 tracks.init()
 
 for track in tracks:
@@ -499,37 +493,54 @@ for phase, _, _ in path_fits:
     n_arrows = n_arrows_all[phase]
     t_ax = np.linspace(0, 1, n_arrows)
     for i, track in enumerate(tracks):
-        # path = get_path(track, phase)
-        path = np.array([track['log_Teff'], track['log_L']]).T
+        path = get_path(track, phase)
+        # path = np.array([track['log_Teff'], track['log_L']]).T
         domain = slice(*track['EEPs'][phase:phase + 2])
         # domain = slice(track))
+        contour_data = track[contour_key][domain]
         if i == 0:
-            contour_range = track[contour_key][domain]
             # start_row = interp_track(track, 'log_Teff', path[0][0], domain)
             # end_row   = interp_track(track, 'log_Teff', path[-1][0], domain)
             contour_vals = np.linspace(
-                min(contour_range), max(contour_range), 
+                min(contour_data), max(contour_data), 
                 n_arrows+1, endpoint=False
             )
+            middle = np.mean(contour_vals)
             contour_step = np.diff(contour_vals)[0]
+            zero_contour = middle
 
-        last_contour = tracks[0][contour_key][domain][0] # Always start at the same contour value
-        contour_points = []
-        for idx in np.arange(domain.start, domain.stop):
-            # If the contour value is >or< last_contour +or- contour_step
-            # then:
-            #     interpolate to get the location of the contour point on this line?
-            #     or just store this point as a countour point?
-            #     yeah that
-            cont_val = track[contour_key][idx]
 
-            if (abs(cont_val - last_contour) >= contour_step):
-                interped_row = interp_track(track, contour_key, 
-                    contour_vals, domain=slice(idx-1, idx+1), left=0, right=0)
-                interped_points = np.array([interped_row['log_Teff'], interped_row['log_L']]).T
-                # if np.any(interped_points != 0):
-                contour_points.append(interped_points)
-                last_contour = cont_val
+        contours = contour_1d(contour_data, contour_step, start=zero_contour)
+        if len(contours) == 0:
+            contours = np.array([[0, 0]])
+        idxs = contours[:, 0] + domain.start
+        steps = contours[:, 1]
+        print(steps)
+
+        contour_points = interp_track(track, 'idx', idxs, left=0, right=0)
+        contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
+
+        if 0 in steps:
+            l_pad = 2*n_arrows - [*steps].index(0)#max(-int(steps[0]), 0)
+            l_pad = max(l_pad, 0)
+            contour_points = np.pad(contour_points, [(l_pad, 0), (0, 0)], 'constant', constant_values=0)
+        # last_contour = tracks[0][contour_key][domain][0] # Always start at the same contour value
+        # contour_points = []
+        # for idx in np.arange(domain.start, domain.stop):
+        #     # If the contour value is >or< last_contour +or- contour_step
+        #     # then:
+        #     #     interpolate to get the location of the contour point on this line?
+        #     #     or just store this point as a countour point?
+        #     #     yeah that
+        #     cont_val = track[contour_key][idx]
+
+        #     if (abs(cont_val - last_contour) >= contour_step):
+        #         interped_row = interp_track(track, contour_key, 
+        #             contour_vals, domain=slice(idx-1, idx+1), left=0, right=0)
+        #         interped_points = np.array([interped_row['log_Teff'], interped_row['log_L']]).T
+        #         # if np.any(interped_points != 0):
+        #         contour_points.append(interped_points)
+        #         last_contour = cont_val
 
 
         # contour_points = interp_track(track, contour_key, contour_vals, 
@@ -551,7 +562,7 @@ for phase, _, _ in path_fits:
     max_len = max([len(l) for l in cont_points])
     for i in range(len(cont_points)):
         l = len(cont_points[i])
-        cont_points[i] = np.pad(cont_points[i], [(0, max_len-l), (0, 0), (0, 0)], 'constant', constant_values=0)
+        cont_points[i] = np.pad(cont_points[i], [(0, max_len-l), (0, 0)], 'constant', constant_values=0)
     
     
     
@@ -563,7 +574,7 @@ for phase, _, _ in path_fits:
         diff[p[1:] == 0.] = 0.
         diff[p[:-1] == 0.] = 0.
         plt.quiver(
-            p[:-1,:,:,0].flatten(), p[:-1,:,:,1].flatten(), diff[:,:,:,0].flatten(), diff[:,:,:,1].flatten(), 
+            p[:-1,:,0].flatten(), p[:-1,:,1].flatten(), diff[:,:,0].flatten(), diff[:,:,1].flatten(), 
             scale=1, angles='xy', scale_units='xy', color='gray',#"C%d"%(phase%10),
             width=0.001, label=None#"Phase %d change"%phase  
         )
