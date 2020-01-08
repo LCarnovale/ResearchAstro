@@ -12,11 +12,11 @@ plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
 
 class TrackSet:
-    _valid_vars = ['mass', 'feh', 'v']
+    _valid_vars = ['mass', 'feh', 'v', 'alpha', 'Y', 'overshoot', 'diffusion']
     # _var_keys   = ['initial_mass', '[Fe/H]', '[a/Fe]', 'v/vcrit']
     def __init__(self, independent_var, vals, defaults, indep_str=None):
         """Fetch a set of tracks with a varying value for `independent_var`,
-        which must be either 'mass', 'feh', or 'v'.
+        which must be either 'mass', 'feh', 'v', 'alpha', 'Y', 'overshoot', or 'diffusion'.
         `vals` should be the values that the independent variable should take,
         and defaults should contain a value for all of the above parameters 
         (in that order), and will determine the values of the fixed parameters.
@@ -73,6 +73,9 @@ class TrackSet:
 
     def __getitem__(self, var):
         return self._tracks.__getitem__(var)
+
+    def __len__(self):
+        return len(self._tracks)
 
     def init(self):
         """ Fetch all the tracks. You need to call this to be able
@@ -170,7 +173,7 @@ def contour_1d(data, contour_step, start=None):
 
 # raise Exception()
 
-def get_track(mass, fe_h, v_vcrit=0):
+def get_track(mass, fe_h, v_vcrit=0, alpha=None, Y=None, diff=None, over=None):
     """ Fetch the evolutionary track of a star.
     'Mass' is the initial mass, in solar masses.
     'fe_h' is the metalicity of the star, 0 for a sun like star.
@@ -300,15 +303,24 @@ def analyse_track(*args):
 
     # Get points of minimum curvature
     track['curv_inv_rad'] = inv_radius
+    track['curv_norm'] = inv_radius / max(inv_radius)
     track['tangent'] = tangent
     track['path_len'] = dists
 
     track['avg_density'] = track['star_mass'] / (10**(3*track['log_R']))
+    track['log_avg_rho'] = np.log(track['avg_density'])
 
     track['idx'] = np.arange(len(dists))
 
     E_ax = track['EEPs'][:]
 
+    # Put a point at the kink near the 1st segment
+    start_idx = E_ax[1]
+    curv_ax_rev = inv_radius[E_ax[2]:E_ax[1]:-1]
+    end_idx = tools.getFromTrigger(curv_ax_rev, 100)[0]
+    end_idx = len(curv_ax_rev) - 1 - end_idx # index was from the reversed segment
+    end_idx += start_idx
+    E_ax = np.array([*E_ax[:2], end_idx, *E_ax[2:]])
     
     if len(E_ax) <= 7:
         print("this one bad: M and Fe/H =", track['initial_mass'], track['[Fe/H]'])
@@ -338,23 +350,23 @@ def analyse_track(*args):
 
         # idx, idx_next = E_ax[slic]
 
-        # # Cut out the section to be analysed
-        # section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
-        # diff = section - phase_grad
-        # # Negate the diff if the initial slope is positive
-        # diff[1] < 0 or diff.__imul__(-1)
-        # try:
-        #     min_idx = tools.getFromTrigger(diff, 0)[0]
-        # except Exception as e:
-        #     plt.plot(diff)
-        #     plt.show()
-        #     raise e
-        # if (idx > idx_next):
-        #     # Swap if we are looking at a reversed slice
-        #     idx, idx_next = idx_next, idx
+        # Cut out the section to be analysed
+        section = gradient[idx:idx_next:(-1 if idx>idx_next else 1)]
+        diff = section - phase_grad
+        # Negate the diff if the initial slope is positive
+        diff[1] < 0 or diff.__imul__(-1)
+        try:
+            min_idx = tools.getFromTrigger(diff, 0)[0]
+        except Exception as e:
+            plt.plot(diff)
+            plt.show()
+            raise e
+        if (idx > idx_next):
+            # Swap if we are looking at a reversed slice
+            idx, idx_next = idx_next, idx
 
-        # # Add the new inflexion point
-        # E_ax = np.append(E_ax, [min_idx+idx])
+        # Add the new inflexion point
+        E_ax = np.append(E_ax, [min_idx+idx])
         # E_ax = [*E_ax[:phase+1], min_idx + idx, *E_ax[phase+1:]]
 
     # Calculate normalised path length
@@ -436,6 +448,7 @@ def get_track_fits(track):
 
 
 tracks_m_var = TrackSet('mass',
+    # [.8, .9, 1., 1.02, 1.04, 1.06, 1.08, 1.1, 1.12, 1.14, 1.16, 1.18, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2],
     [.8, .9, 1., 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2],
     (None, 0, 0), indep_str=r"{} $M_\odot$"
 )
@@ -453,35 +466,47 @@ tracks_v_var = TrackSet('v',
 # Each phase and the number of control points to fit with, 
 # and the number of points to split the path into for fitting.
 path_fits = [
-    (1, 22, 100),
-    (2, 10, 100),
-    (3, 8, 400),
+    (2, 22, 100),
+    (3, 10, 100),
+    (4, 8, 400),
     # (4, 20, 100),
-    (5, 5, 100),
-    (8, 20, 100)
 ]
 
 optimized_c_points = {}
 
 fig = plt.figure("Fitting bezier curves to HR tracks")
-ax = fig.subplots()
+ax, ax2 = fig.subplots(ncols=2)
+ax2.invert_xaxis()
 ax.invert_xaxis()
 
-contour_key = 'avg_density'
+contour_key = 'log_avg_rho'
+normalise_contour_data = False # Normalise data before finding contours
 
 n_arrows_all = {
-    1: 5,
-    2: 10,
+    1: 20,
+    2: 5,
     3: 10,
-    4: 10,
+    4: 50,
     5: 10,
     6: 10,
-    8: 2,
-    9: 2
 }
 
-tracks = tracks_m_var
+import sys
+argv = sys.argv
+if 'm' in argv:
+    tracks = tracks_m_var
+elif 'feh' in argv:
+    tracks = tracks_feh_var
+else:
+    print('using mass variation tracks, give "m" or "feh" for a specific track')
+    tracks = tracks_m_var
 tracks.init()
+
+quiver_kwargs = {
+    'angles':'xy', 
+    'scale_units':'xy', 
+    'scale':1
+}
 
 for track in tracks:
     analyse_track(track)
@@ -492,25 +517,36 @@ for phase, _, _ in path_fits:
     cont_points = [] # contour points, not control points
     n_arrows = n_arrows_all[phase]
     t_ax = np.linspace(0, 1, n_arrows)
+    print("phase:", phase)
+    phase_colour = "C%d"%(phase%10)
+    l_pads = []
     for i, track in enumerate(tracks):
-        path = get_path(track, phase)
+        print("track:", tracks.strfmt(i))
         # path = np.array([track['log_Teff'], track['log_L']]).T
-        domain = slice(*track['EEPs'][phase:phase + 2])
+        NUM_SEG = 1 # Number of segments to plot over 
+        domain = slice(*track['EEPs'][phase:phase + NUM_SEG+1:NUM_SEG])
         # domain = slice(track))
-        contour_data = track[contour_key][domain]
+        contour_data = track[contour_key][domain] # Values to use to find contours
+        if normalise_contour_data:
+            contour_data /= max(contour_data)
         if i == 0:
             # start_row = interp_track(track, 'log_Teff', path[0][0], domain)
             # end_row   = interp_track(track, 'log_Teff', path[-1][0], domain)
-            contour_vals = np.linspace(
-                min(contour_data), max(contour_data), 
-                n_arrows+1, endpoint=False
-            )
-            middle = np.mean(contour_vals)
-            contour_step = np.diff(contour_vals)[0]
+            # contour_vals = np.linspace(
+                # min(contour_data), max(contour_data), 
+                # n_arrows+1, endpoint=False
+            # )
+            contour_data_range = max(contour_data) - min(contour_data)
+            contour_step = contour_data_range / (n_arrows + 1)
+            contour_step = contour_step
+            middle = min(contour_data) + contour_data_range / 2
             zero_contour = middle
 
-
         contours = contour_1d(contour_data, contour_step, start=zero_contour)
+        # if i > 0:
+            
+        # last_contour = contours
+        
         if len(contours) == 0:
             contours = np.array([[0, 0]])
         idxs = contours[:, 0] + domain.start
@@ -520,45 +556,38 @@ for phase, _, _ in path_fits:
         contour_points = interp_track(track, 'idx', idxs, left=0, right=0)
         contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
 
-        if 0 in steps:
-            l_pad = 2*n_arrows - [*steps].index(0)#max(-int(steps[0]), 0)
-            l_pad = max(l_pad, 0)
-            contour_points = np.pad(contour_points, [(l_pad, 0), (0, 0)], 'constant', constant_values=0)
-        # last_contour = tracks[0][contour_key][domain][0] # Always start at the same contour value
-        # contour_points = []
-        # for idx in np.arange(domain.start, domain.stop):
-        #     # If the contour value is >or< last_contour +or- contour_step
-        #     # then:
-        #     #     interpolate to get the location of the contour point on this line?
-        #     #     or just store this point as a countour point?
-        #     #     yeah that
-        #     cont_val = track[contour_key][idx]
+        # if 1: #0 in steps:
+            # Remove repeated steps:
+        mask = np.array([True, *(steps[1:] != steps[:-1])])
+        steps = steps[mask]
+        contour_points = contour_points[mask]
+        l_pad = int(120 - steps[0])
+        l_pads.append(l_pad)
+        if l_pad < 0:
+            print("Bad pad!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        contour_points = np.pad(contour_points, [(l_pad, 0), (0, 0)], 'constant', constant_values=0)
+        print("padding by", l_pad)
+        
 
-        #     if (abs(cont_val - last_contour) >= contour_step):
-        #         interped_row = interp_track(track, contour_key, 
-        #             contour_vals, domain=slice(idx-1, idx+1), left=0, right=0)
-        #         interped_points = np.array([interped_row['log_Teff'], interped_row['log_L']]).T
-        #         # if np.any(interped_points != 0):
-        #         contour_points.append(interped_points)
-        #         last_contour = cont_val
-
-
-        # contour_points = interp_track(track, contour_key, contour_vals, 
-        #     domain, left=0, right=0, index_axis=True)
-        # contour_points = np.array([contour_points['log_Teff'], contour_points['log_L']]).T
         contour_points = np.array(contour_points)
 
         cont_points.append(contour_points)
+        # path = np.concatenate([get_path(track, p) for p in range(1, 8)])
+        path = get_path(track, phase)
 
         # if phase == 0:
-        plt.plot(*path.T, color="C%d"%(phase%10), label=(None if phase>1 else tracks.strfmt(i)))
-        # else:
-        #     plt.plot(*path.T, color="C%d"%(phase%10), label=None)
+        ax.plot(*path.T, ':', color=phase_colour, label=(None if phase>2 else tracks.strfmt(i)))
+        # last_phase = phase == path_fits[-1][0]
+        if phase == path_fits[-1][0]:
+            if i == 0 or i == (len(tracks) - 1):
+                s = tracks.strfmt(i)
+                data_point = path[-1]
+                text_point = data_point + np.array([0., 0.1])
+                ax.annotate(
+                    s, data_point, xytext=text_point,
+                    size='small', ha='center')
+            
 
-        # c_points = optimized_c_points[track][phase]
-
-        # points.append(track_fs[i](phase, t_ax)) # Use Bezier curve fits
-        # points.append(fb.interp_path(path, t_ax, normalised=True)) # Interpolate over the path
     max_len = max([len(l) for l in cont_points])
     for i in range(len(cont_points)):
         l = len(cont_points[i])
@@ -573,19 +602,88 @@ for phase, _, _ in path_fits:
         diff = p[1:] - p[:-1]
         diff[p[1:] == 0.] = 0.
         diff[p[:-1] == 0.] = 0.
-        plt.quiver(
-            p[:-1,:,0].flatten(), p[:-1,:,1].flatten(), diff[:,:,0].flatten(), diff[:,:,1].flatten(), 
-            scale=1, angles='xy', scale_units='xy', color='gray',#"C%d"%(phase%10),
-            width=0.001, label=None#"Phase %d change"%phase  
-        )
+        diff_x = diff[:,:,0].flatten()
+        diff_y = diff[:,:,1].flatten()
 
-        # p = fb.plot_curve(c_opt, ax, len(path))[0]
-        # p.set_label("Phase %d fit"%phase)
-        # p.set_linestyle('--')
-plt.title(f"Evolutionary Tracks for varying {tracks.indep_var}, lines of constant {contour_key}")
-plt.xlabel(r"$\log(T_{eff})$")
-plt.ylabel(r"$\log(L)$")
-plt.legend()
+        # ax.quiver(
+        #     p[:-1,:,0].flatten(), p[:-1,:,1].flatten(), diff_x, diff_y, 
+        #     **quiver_kwargs, color='gray',#"C%d"%(phase%10),
+        #     width=0.001, label=None#"Phase %d change"%phase  
+        # )
+        # Get the average diff
+        for i in range(len(tracks) - 1):
+            px = p[i,:,0]
+            py = p[i,:,1]
+            dx = diff[i,:,0]
+            dy = diff[i,:,1]
+            if tracks.indep_var == 'mass':
+                mask = np.logical_and(dx > 0, dy > 0)
+            else:
+                mask = px != 0. 
+            print(tracks.indep_var)
+            px = px[mask]
+            py = py[mask]
+            dx = dx[mask]
+            dy = dy[mask]
+            
+            samples = 5
+            points_start = 1
+            
+            px = px[points_start::samples]
+            py = py[points_start::samples]
+            
+            sum_x = dx[::samples]
+            sum_y = dy[::samples]
+            for i in range(1, samples):
+                new_x = dx[i::samples]
+                new_y = dy[i::samples]
+                try:
+                    sum_x += new_x
+                    sum_y += new_y
+                except:
+                    sum_x[:-1] += new_x
+                    sum_y[:-1] += new_y
+            
+            if len(sum_x) != len(px):
+                sum_x = sum_x[:len(px)]
+                sum_y = sum_y[:len(px)]
+                
+            sum_x /= samples
+            sum_y /= samples
+            
+            ax.quiver(px, py, sum_x, sum_y, **quiver_kwargs, color=phase_colour, width=0.004)
+            ax2.quiver(0, 0, sum_x, sum_y, **quiver_kwargs, color=phase_colour, width=0.002)
+            
+        sum_x = np.sum(diff[:, :, 0], axis=1)
+        nnz_x = np.count_nonzero(diff[:, :, 0], axis=1)
+        avg_x = sum_x / nnz_x
+        sum_y = np.sum(diff[:, :, 1], axis=1)
+        nnz_y = np.count_nonzero(diff[:, :, 1], axis=1)
+        avg_y = sum_y / nnz_y
+        
+        avg_diff = np.array([avg_x, avg_y])
+        # ax2.quiver(0, 0, avg_x, avg_y, **quiver_kwargs, color=phase_colour, width=0.002)
+        # ax2.plot(avg_x, avg_y, 'o', color=phase_colour)
+    # for i, track in enumerate(tracks):
+        # if i == len(avg_x): continue
+        # path = get_path(track, phase)
+        # points = fb.interp_path(path, [.25, .5, .75], True)
+        # points_x, points_y = points.T
+        # ax.quiver(points_x, points_y, 
+            # np.tile(avg_x[i], len(points_x)), 
+            # np.tile(avg_y[i], len(points_x)), 
+            # **quiver_kwargs, width=0.002)
+      
+        
+ax.set_title(f"Evolutionary Tracks for varying {tracks.indep_var}, lines of constant {contour_key}")
+ax.set_xlabel(r"$\log(T_{eff})$")
+ax.set_ylabel(r"$\log(L)$")
+ax2.set_title("Spread of track shifts")
+ax2.set_xlabel(r"$\log(T_{eff})$")
+ax2.set_ylabel(r"$\log(L)$")
+ax2.plot(0, 0, 'ko')
+ax.set_xlim(4, 3.4)
+# ax.legend()
 plt.show()
 
 

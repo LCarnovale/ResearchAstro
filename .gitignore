@@ -4,3 +4,5 @@
 *.pdf
 *.zip
 *.pyc
+*.png
+*.tar*
