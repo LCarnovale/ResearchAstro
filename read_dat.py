@@ -9,12 +9,12 @@ chunk_size = 256
 df = pd.read_csv(source_file, header=0, delim_whitespace=True, chunksize=chunk_size)
 
 with open(output, 'w') as f:
-    f.write('id, mass, Y_init, Feh_init, alpha, diff, overshoot, teff, lum\n')
+    f.write('id, mass, radius, Y_init, Feh_init, alpha, diff, overshoot, teff, lum\n')
 
 # flag = True
 n = 1
-duplicate_count = 0
 for chunk in df:
+    duplicate_count = 0
     cols = np.array(chunk.columns.values.tolist())
     lines = []
     for i in range(len(chunk)):
@@ -34,7 +34,7 @@ for chunk in df:
         overshoot = available_row_data[available_cols == 'overshoot'][0]
         # undershoot = available_row_data[available_cols == 'undershoot'][0]
         # ev_state = available_row_data[available_cols == 'ev_stage'][0]
-        # radius = available_row_data[available_cols == 'radius']
+        radius = available_row_data[available_cols == 'radius'][0]
         teff = available_row_data[available_cols == 'Teff'][0]
         # log_g = available_row_data[available_cols == 'log_g']
         luminosity = available_row_data[available_cols == 'L'][0]
@@ -42,7 +42,7 @@ for chunk in df:
         # period_spacing = available_row_data[available_cols == 'delta_Pg_asym']
         # core_hydrogen_frac = available_row_data[available_cols == 'X_c']
 
-        new_line = f"{id}, {mass}, {init_helium}, {init_metallicity}, {alpha}, {diffusion}, {overshoot}, {teff}, {luminosity}"
+        new_line = f"{id}, {mass}, {radius}, {init_helium}, {init_metallicity}, {alpha}, {diffusion}, {overshoot}, {teff}, {luminosity}"
         if not lines or lines[-1] != new_line:
             lines.append(new_line)
         else:
