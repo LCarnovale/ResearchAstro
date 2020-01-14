@@ -9,11 +9,12 @@ chunk_size = 256
 df = pd.read_csv(source_file, header=0, delim_whitespace=True, chunksize=chunk_size)
 
 with open(output, 'w') as f:
-    f.write('id, mass, radius, Y_init, Feh_init, alpha, diff, overshoot, teff, lum\n')
+    f.write('id, mass, radius, Y_init, Z_init, alpha, diff, overshoot, teff, lum\n')
 
 # flag = True
 n = 1
 for chunk in df:
+    break
     duplicate_count = 0
     cols = np.array(chunk.columns.values.tolist())
     lines = []
@@ -23,8 +24,8 @@ for chunk in df:
         available_cols = cols[mask] # non-NaN column names
         available_row_data = vals[mask] # non-NaN row values
 
-        # numax = available_row_data[available_cols == 'nu_max']
-        # age = available_row_data[available_cols == 'age']
+        numax = available_row_data[available_cols == 'nu_max'][0]
+        age = available_row_data[available_cols == 'age'][0]
         mass = available_row_data[available_cols == 'M'][0]
         id = available_row_data[available_cols == 'id'][0]
         init_helium = available_row_data[available_cols == 'Y'][0]

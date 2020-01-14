@@ -6,3 +6,6 @@
 *.pyc
 *.png
 *.tar*
+*.fits
+*.dat
+out_split_*
