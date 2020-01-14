@@ -106,7 +106,17 @@ class Track:
             self.log_avg_rho = np.log(track['avg_density'])
         except:
             pass
+            
+    def __len__(self):
+        return len(self.T_ax)
 
+def listify(list_or_scalar):
+    try:
+        list_or_scalar[0]
+    except:
+        return [list_or_scalar]
+    else:
+        return list_or_scalar
 
 class TrackSet:
     def __init__(self, *tracks):
@@ -124,15 +134,16 @@ class TrackSet:
         """ Get the number of tracks in this set """
         return len(self._tracks)
 
-    def add_ep_fun(self, func):
+    def add_ep_func(self, func):
         """ Add a function to find ep (evolution points) points on tracks.
         When added, the function will be used on all current tracks,
         and all future tracks will be run by it aswell.
+        func should return either a single index or a list of indexes.
 
-        func: func(track) -> index location in track.
+        func: func(track) -> index(s) location in track.
         """
         for ep, t in zip(self._eps, self._tracks):
-            ep.append(func(t))
+            ep += listify(func(t))
 
         self._ep_funcs.append(func)
 
@@ -143,7 +154,8 @@ class TrackSet:
         self._tracks.append(track)
         eps = []
         for f in self._ep_funcs:
-            eps.append(f(track))
+            eps += listify(f(track))
+
         self._eps.append(eps)
 
     def get_ep_point(self, track_index, ep_index):
@@ -193,8 +205,8 @@ def get_track_from_id(id, *extra_keys):
     T_ax = full['log_Teff'][mask]
     L_ax = full['log_L'][mask]
 
-    return Track(T_ax, L_ax, mass=init_mass,
-        Y=init_Y, feh=init_feh, alpha=init_alpha,
+    return Track(T_ax, L_ax, M=init_mass,
+        Y=init_Y, Z=init_feh, alpha=init_alpha,
         diff=init_diff, over=init_over, **extras)
 
 def get_track(mass, Y, feh, alpha, diff, over):

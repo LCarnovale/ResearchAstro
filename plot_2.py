@@ -26,6 +26,31 @@ else:
 
 import split_grid as sg
 
+def get_colour(v):
+    """ Get an RGB colour from a smooth continuous spectrum
+    given a value `v` between 0 and 1.
+    """
+    v %= 1
+    RGB = np.array([
+        [1, 1, 0, 0, 0, 1],
+        [0, 1, 1, 1, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+    ])
+    RGB = RGB[:, [0, 1, 4, 5]]
+    nVals = len(RGB[0])
+
+    v = (v * nVals) % nVals # value within [0, 6)
+    left = int(v) % nVals
+    right = int(v + 1) % nVals
+    dec = v % 1 # value within [0, 1)
+
+    left_rgb = RGB[:, left]
+    right_rgb = RGB[:, right]
+
+    shift = right_rgb - left_rgb
+    return left_rgb + dec * shift
+
+
 
 
 font = {'weight' : 'normal',
@@ -36,7 +61,7 @@ plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
 
 # Get unique tracks
-sg.init('mass_conv_core', 'center_degeneracy')
+sg.init('mass_conv_core', 'center_degeneracy', 'center_h1')
 unq = sg.get_unique_tracks()
 
 solar_X = 0.7346
@@ -174,31 +199,62 @@ def run():
         min_T += curv_max - window_width
         return min_T
 
-    def mass_conv_core_ep(track):
+    def h_depletion(track):
         try:
-            track.mass_conv_core
+            track.center_h1
         except:
-            raise Exception("Unable to see mass_conv_core field in track.")
+            raise Exception("Unable to see center_h1 field in track.")
         else:
-            mask = track.mass_conv_core != 0
-            return np.argmin(track.mass_conv_core[mask])
+            mask = track.center_h1 < 1e-9
+            zero = np.flatnonzero(mask)[0]
+            return zero
+
+    def density_eps(track):
+        density = np.log10(track.M) - 3*track.log_R
+        abs_d = abs(density + 2)
+        m = density + 2 < 0
+        return np.flatnonzero(m)[0]
+        # return np.argmin(abs_d)
 
     # def degen_ep(track):
     #     return np.argmax(track.center_degeneracy)
 
     trackset = sg.TrackSet(
-        *[ sg.get_track_from_id(id) for id in track_ids ]
+        *[ sg.get_track_from_id(id, 'log_R', 'star_age') for id in track_ids ]
     )
 
-    trackset.add_ep_fun(zams_ep)
-    trackset.add_ep_fun(mass_conv_core_ep)
+    trackset.add_ep_func(zams_ep)
+    trackset.add_ep_func(h_depletion)
+    trackset.add_ep_func(density_eps)
+    ep_labels = ['ZAMS', 'H depletion', '1% Solar Avg Density']
     # trackset.add_ep_fun(degen_ep)
 
     for i, track in enumerate(trackset):
         last_track = i + 1 == len(trackset)
 
-        h = plt.plot(track.T_ax, track.L_ax,
-        label=f"M: {track.mass:.3f}, Y: {track.Y:.4f}, Z: {track.feh:.4f}, alpha: {track.alpha:.4f}, diff: {track.diff:.4f}, over: {track.over:4f}")
+
+        s = f"{varying}: {track.__getattribute__(varying)}"
+
+        print(s)
+        if last_track or i == 0:
+            midpoint = int(len(track) * .75)
+            data_point = (track.T_ax[midpoint], track.L_ax[midpoint])
+            if i == 0:
+                text_point = (data_point[0]+0.01, data_point[1])
+                plt.annotate(
+                    s, data_point, xytext=text_point,
+                    size='small', ha='right')
+            else:
+                text_point = (data_point[0]-0.01, data_point[1])
+                plt.annotate(
+                    s, data_point, xytext=text_point,
+                    size='small', ha='left')
+        age_ax = (track.star_age) / 1e10
+        for k in range(len(track.T_ax)):
+            T = track.T_ax[k:k+2]
+            L = track.L_ax[k:k+2]
+            age = age_ax[k]
+            plt.plot(T, L, '-', color=get_colour(age))
         # h= plt.plot(track.star_age, track.mass_conv_core)
 
         if not last_track:
@@ -209,14 +265,15 @@ def run():
                 plt.quiver(
                     eps_this[e, 0], eps_this[e, 1],
                     eps_shift[e, 0], eps_shift[e, 1],
-                    **quiver_kwargs, color=f"C{e}", width=0.003
+                    **quiver_kwargs, color=f"C{e}", width=0.003,
+                    label=(ep_labels[e] if i == 0 else None)
                 )
 
 
 
     plt.title(f"Evolutionary tracks with varying {varying}")
     plt.gca().invert_xaxis()
-    plt.legend()
+    plt.legend(title=varying)
     plt.xlabel(r"$\log(T_{eff})$")
     plt.ylabel(r"$\log(L)$")
     plt.show()
