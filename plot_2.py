@@ -10,11 +10,17 @@ mass_key = 'M'
 #     mass_key = 'star_mass'
 
 
-valid_vary = [mass_key, 'Z', 'Y', 'alpha', 'diff', 'over']
+valid_vary = [mass_key, 'Z', 'Y', 'alpha', 'diff', 'over'][:-2] # diff and over dont work yet
 
 if len(argv) > 1:
     varying = argv[1]
-    if varying not in valid_vary:
+    no_plot = 'no_plot' in argv
+    run_all = False
+    if varying == 'all':
+        varying = valid_vary[0]
+        no_plot = True
+        run_all = True
+    elif varying not in valid_vary:
         print("Invalid vary paramter given.")
         print("Must be one of:", valid_vary)
         exit()
@@ -31,15 +37,15 @@ def get_colour(v):
     given a value `v` between 0 and 1.
     """
     v %= 1
-    RGB = np.array([
+    RGB = np.array([ # this will cover the whole RGB spectrum
         [1, 1, 0, 0, 0, 1],
         [0, 1, 1, 1, 0, 0],
         [0, 0, 0, 1, 1, 1],
     ])
-    RGB = RGB[:, [0, 1, 4, 5]]
+    RGB = RGB[:, [0, 1, 4, 5]] # Select a colour range that looks good
     nVals = len(RGB[0])
 
-    v = (v * nVals) % nVals # value within [0, 6)
+    v = (v * nVals) % nVals # value within [0, nVals)
     left = int(v) % nVals
     right = int(v + 1) % nVals
     dec = v % 1 # value within [0, 1)
@@ -61,7 +67,7 @@ plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
 
 # Get unique tracks
-sg.init('mass_conv_core', 'center_degeneracy', 'center_h1')
+sg.init('mass_conv_core', 'center_degeneracy')
 unq = sg.get_unique_tracks()
 
 solar_X = 0.7346
@@ -74,8 +80,58 @@ center_alpha = 1.836; range_alpha = 0.05
 center_diff  = 1; range_diff  = 0.01
 center_over  = 0.001; range_over  = 0.01
 
+ep_shifts = {
+    v:0 for v in valid_vary
+}
 
+ep_nu_shifts = {
+    v:0 for v in valid_vary
+}
+
+vary_vals = {v:list() for v in valid_vary}
+trackss = None
+
+def zams_ep(track):
+    window_width = 100
+    # curv_max = np.argmax(track.curv_inv_rad)
+    min_T = np.argmin(track.T_ax[0: window_width])
+    # min_T += curv_max - window_width
+    return min_T
+
+def h_depletion(track):
+    try:
+        track.center_h1
+    except:
+        raise Exception("Unable to see center_h1 field in track.")
+    else:
+        mask = track.center_h1 < 1e-9
+        zero = np.flatnonzero(mask)[0]
+        return zero
+
+def density_eps(track):
+    d_ax = np.log10(track.M) - 3*track.log_R
+    # abs_d = abs(density + 2)
+    y_ax = np.arange(len(track))
+    # plt.plot(d_ax, y_ax)
+    # plt.show()
+    idx = np.interp(2., -d_ax, y_ax)
+    return idx
+    # m = density + 2 < 0
+    # return np.flatnonzero(m)[0]
+
+quiver_kwargs = {
+    'angles':'xy',
+    'scale_units':'xy',
+    'scale':1
+}
+
+ep_labels = None
 def run():
+    global ep_shifts
+    global trackss
+    global vary_vals
+    global ep_labels
+
     max_mass = solar_mass + range_mass
     min_mass = solar_mass - range_mass
 
@@ -172,110 +228,171 @@ def run():
         plt.show()
         exit()
 
-    plt.figure("Evolutionary tracks")
+    plt.figure(f"{varying}_var")
 
-    # Get curvature
-    # track = sg.get_track_from_id(track_ids[0], 'log_R', 'star_age')
-
-    # plt.plot(track.star_age, track.curv_inv_rad)
-    # plt.show()
-    # log_rho = np.log10(track.M) - 3*track.log_R
-    # rho_range = np.max(log_rho) - np.min(log_rho)
-    # contours = np.linspace(np.min(log_rho), np.max(log_rho), 10)
-
-    # plt.plot(log_rho)
-    # plt.show()
-
-    quiver_kwargs = {
-        'angles':'xy',
-        'scale_units':'xy',
-        'scale':1
-    }
-
-    def zams_ep(track):
-        window_width = 5
-        curv_max = np.argmax(track.curv_inv_rad)
-        min_T = np.argmin(track.T_ax[curv_max-window_width:curv_max+window_width])
-        min_T += curv_max - window_width
-        return min_T
-
-    def h_depletion(track):
-        try:
-            track.center_h1
-        except:
-            raise Exception("Unable to see center_h1 field in track.")
-        else:
-            mask = track.center_h1 < 1e-9
-            zero = np.flatnonzero(mask)[0]
-            return zero
-
-    def density_eps(track):
-        density = np.log10(track.M) - 3*track.log_R
-        abs_d = abs(density + 2)
-        m = density + 2 < 0
-        return np.flatnonzero(m)[0]
         # return np.argmin(abs_d)
 
     # def degen_ep(track):
     #     return np.argmax(track.center_degeneracy)
 
     trackset = sg.TrackSet(
-        *[ sg.get_track_from_id(id, 'log_R', 'star_age') for id in track_ids ]
+        *[ sg.get_track_from_id(id, 'log_R', 'star_age', 'center_h1') for id in track_ids ]
     )
+
+    trackss = trackset
 
     trackset.add_ep_func(zams_ep)
     trackset.add_ep_func(h_depletion)
     trackset.add_ep_func(density_eps)
     ep_labels = ['ZAMS', 'H depletion', '1% Solar Avg Density']
-    # trackset.add_ep_fun(degen_ep)
+
+
+
+    # The rough left/right shift of tracks:
+    shift = int(np.sign(trackset[1].T_ax[0] - trackset[0].T_ax[0]))
 
     for i, track in enumerate(trackset):
         last_track = i + 1 == len(trackset)
 
+        R = 10**track.log_R
+        T = track.T_ax
 
-        s = f"{varying}: {track.__getattribute__(varying)}"
-
-        print(s)
-        if last_track or i == 0:
-            midpoint = int(len(track) * .75)
-            data_point = (track.T_ax[midpoint], track.L_ax[midpoint])
-            if i == 0:
-                text_point = (data_point[0]+0.01, data_point[1])
-                plt.annotate(
-                    s, data_point, xytext=text_point,
-                    size='small', ha='right')
-            else:
-                text_point = (data_point[0]-0.01, data_point[1])
-                plt.annotate(
-                    s, data_point, xytext=text_point,
-                    size='small', ha='left')
-        age_ax = (track.star_age) / 1e10
-        for k in range(len(track.T_ax)):
-            T = track.T_ax[k:k+2]
-            L = track.L_ax[k:k+2]
-            age = age_ax[k]
-            plt.plot(T, L, '-', color=get_colour(age))
-        # h= plt.plot(track.star_age, track.mass_conv_core)
+        numax_ax = track.M / ((R**2) * np.sqrt(T/5777.)) * 3100
+        nupk = max(numax_ax)
 
         if not last_track:
             eps_this = trackset.get_ep_points(i)     # shape (<number of eps>, 2)
             eps_next = trackset.get_ep_points(i + 1)
             eps_shift = eps_next - eps_this
+            ep_shifts[varying] += eps_shift
+
             for e in range(trackset.num_eps):
-                plt.quiver(
-                    eps_this[e, 0], eps_this[e, 1],
-                    eps_shift[e, 0], eps_shift[e, 1],
-                    **quiver_kwargs, color=f"C{e}", width=0.003,
-                    label=(ep_labels[e] if i == 0 else None)
+                nu_shift = np.zeros(trackset.num_eps)
+                nu_shift[e] = (
+                    trackset.interp_ep(i, e, nupk - numax_ax) -
+                    trackset.interp_ep(i + 1, e, nupk - numax_ax)
                 )
+                ep_nu_shifts[varying] += nu_shift
+                print(ep_nu_shifts)
+                if not no_plot:
+                    plt.quiver(
+                        eps_this[e, 0], eps_this[e, 1],
+                        eps_shift[e, 0], eps_shift[e, 1],
+                        **quiver_kwargs, color=f"C{e}", width=0.003,
+                        label=(ep_labels[e] if i == 0 else None)
+                    )
+
+        vary_val = track.__getattribute__(varying)
+        vary_vals[varying].append(vary_val)
+
+        s = f"{varying}: {vary_val:.4f}"
+
+        print(s)
+
+        if last_track or i == 0:
+            midpoint = int(len(track) * .75)
+            data_point = (track.T_ax[midpoint], track.L_ax[midpoint])
+            ha_i, ha_f = ['left', 'right'][::shift]
+            if i == 0:
+                text_point = (data_point[0]-shift*0.005, data_point[1])
+                plt.annotate(
+                    s, data_point, xytext=text_point,
+                    size='small', ha=ha_i)
+            else:
+                text_point = (data_point[0]+shift*0.005, data_point[1])
+                plt.annotate(
+                    s, data_point, xytext=text_point,
+                    size='small', ha=ha_f)
+
+        if not no_plot:
+            age_ax = ((track.star_age) / 15e9)
+            # age_ax /= age_ax[-1]
+            step = 4
+            for k in range(trackset.eps[i][0], len(track.T_ax), step):
+                T = track.T_ax[k:k+step+1]
+                L = numax_ax[k:k+step+1]
+                age = age_ax[k]
+                plt.loglog(T, L, '-', color=get_colour(age))
+
+        # h= plt.plot(track.star_age, track.mass_conv_core)
+
+    ep_shifts[varying] /= (len(trackset) - 1)
+
+    if not no_plot:
+        plt.title(f"Evolutionary tracks with varying {varying}, colour coded by Age / 10 Gyr")
+        plt.gca().invert_xaxis()
+        plt.gca().invert_yaxis()
+        plt.legend(title="Evolutionary stages")
+        plt.xlabel(r"$T_{eff} [K]$")
+        plt.ylabel(r"$L$ [solar]")
+        plt.show()
+
+if __name__ == '__main__':
+    if run_all:
+        for v in valid_vary:
+            varying = v
+            run()
+
+        plt.close('all')
+
+        fig = plt.figure('all_vary')
+        axes = fig.subplots(ncols=3, nrows=2)
+
+        arrow_mags = {
+            'M' : [0.01, 0.01, 0.01],
+            'Y' : [0.01, 0.01, 0.01],
+            'Z' : [0.0025, 0.0025, 0.001],
+            'alpha': [0.2, 0.2, 0.05]
+        }
+
+        for var, vals in vary_vals.items():
+            vals = np.array(vals)
+            vals = vals[1:] - vals[:-1]
+            mean = np.mean(vals)
+            ep_shifts[var] /= mean
+            ep_nu_shifts[var] /= mean
+
+            vary_vals[var] = mean
+
+        for i, ax in enumerate(axes[0]):
+            title = ep_labels[i]
+            ax.set_title(title)
+            ax.set_xlabel(r"$T_{eff} [K]$")
+            ax.set_ylabel(r"$L$ [solar]")
+            ax.invert_xaxis()
+
+            for k, var in enumerate(valid_vary):
+                arr_mag = arrow_mags[var][i]
+                (u, v) = ep_shifts[var][i] * arr_mag
+                ax.quiver(
+                    u, v, **quiver_kwargs, width=0.007, label=f"{var} [+{arr_mag*100}%]",
+                    color=f'C{k}')
+
+            ax.legend()
+            ax.set_xlim(150, -150)
+            ax.set_ylim(-0.2, 0.2)
+
+        for i, ax in enumerate(axes[1]):
+            title = ep_labels[i]
+            ax.set_title(title)
+            ax.set_xlabel(r"$T_{eff} [K]$")
+            ax.set_ylabel(r"$\nu_{max}$")
+            ax.invert_xaxis()
+
+            for k, var in enumerate(valid_vary):
+                arr_mag = arrow_mags[var][i]
+                u = ep_shifts[var][i][0] * arr_mag
+                v = ep_nu_shifts[var][i] * arr_mag
+                ax.quiver(
+                    u, v, **quiver_kwargs, width=0.007, label=f"{var} [+{arr_mag*100}%]",
+                    color=f'C{k}')
 
 
+            ax.legend()
+            ax.set_xlim(150, -150)
+            ax.set_ylim(1500, -1500)
 
-    plt.title(f"Evolutionary tracks with varying {varying}")
-    plt.gca().invert_xaxis()
-    plt.legend(title=varying)
-    plt.xlabel(r"$\log(T_{eff})$")
-    plt.ylabel(r"$\log(L)$")
-    plt.show()
 
-if __name__ == '__main__': run()
+        plt.show()
+    else:
+        run()

@@ -23,10 +23,11 @@ keep_headers = [
     'log_R',# '<f8'),
     'log_Teff',# '<f8'),
     'log_L',# '<f8')
+    'center_h1',
 ]
 
 init_conds_headers = [
-'M', 'Y', 'Z', 'alpha', 'diffusion', 'eta', 'overshoot'
+    'M', 'Y', 'Z', 'alpha', 'diffusion', 'eta', 'overshoot',
 ]
 
 

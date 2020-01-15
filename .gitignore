@@ -9,3 +9,4 @@
 *.fits
 *.dat
 out_split_*
+*.sh

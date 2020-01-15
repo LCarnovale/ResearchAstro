@@ -69,7 +69,7 @@ def keys(ob):
             raise Exception("Unable to get keys/names of obejct.")
 
 class Track:
-    def __init__(self, T_ax, L_ax, **init_vals):
+    def __init__(self, log_T_ax, log_L_ax, **init_vals):
         """ `init_vals` should be a dictionary of key:value pairs.
 
         T_ax and L_ax are expected to be log values.
@@ -77,16 +77,18 @@ class Track:
         for k in init_vals:
             self.__setattr__(k, init_vals[k])
 
-        self.T_ax = T_ax
-        self.L_ax = L_ax
+        self.log_T_ax = log_T_ax
+        self.T_ax  = 10**log_T_ax
+        self.log_L_ax = log_L_ax
+        self.L_ax  = 10**log_L_ax
 
         # Calculate some other useful things
 
         points = np.array([self.T_ax, self.L_ax]).T
         dists = fb.get_dist_array(points)
         # Get tangent and curvature arrays:
-        dT = np.gradient(T_ax, dists)
-        dL = np.gradient(L_ax, dists)
+        dT = np.gradient(self.T_ax, dists)
+        dL = np.gradient(self.L_ax, dists)
 
         d2T = np.gradient(dT, dists)
         d2L = np.gradient(dL, dists)
@@ -106,7 +108,7 @@ class Track:
             self.log_avg_rho = np.log(track['avg_density'])
         except:
             pass
-            
+
     def __len__(self):
         return len(self.T_ax)
 
@@ -141,6 +143,7 @@ class TrackSet:
         func should return either a single index or a list of indexes.
 
         func: func(track) -> index(s) location in track.
+        *the indexes can be floats, and the points will be interpolated.
         """
         for ep, t in zip(self._eps, self._tracks):
             ep += listify(func(t))
@@ -166,16 +169,53 @@ class TrackSet:
         """
         t = self._tracks[track_index]
         ep = self._eps[track_index][ep_index]
-        point = (t.T_ax[ep], t.L_ax[ep])
+        try:
+            point = (t.T_ax[ep], t.L_ax[ep])
+        except:
+            # interpolate instead
+            x_ax = np.arange(len(t))
+            epi = int(ep)
+            T_ep = np.interp(
+                ep, x_ax[epi:epi+2], t.T_ax[epi:epi+2],
+                left=t.T_ax[epi], right=t.T_ax[epi+1]
+            )
+            L_ep = np.interp(
+                ep, x_ax[epi:epi+2], t.L_ax[epi:epi+2],
+                left=t.L_ax[epi], right=t.L_ax[epi+1]
+            )
+            point = (T_ep, L_ep)
+
         return np.array(point)
 
     def get_ep_points(self, track_index):
         """ Get a list of (log_T, log_L) points for a track.
         """
-        t = self._tracks[track_index]
+        # t = self._tracks[track_index]
         eps = self._eps[track_index]
-        points = [(t.T_ax[ep], t.L_ax[ep]) for ep in eps]
+        points = [self.get_ep_point(track_index, i) for i in range(len(eps))]
         return np.array(points)
+
+    def interp_ep(self, track_index, ep_index, axis):
+        """ Get the interpolated value at an ep point along the given axis.
+        """
+        ep = self._eps[track_index][ep_index]
+        try:
+            return axis[ep]
+        except:
+            # interpolate instead
+            x_ax = np.arange(len(axis))
+            epi = int(ep)
+            # import matplotlib.pyplot as plt
+            # plt.plot(x_ax, axis)
+            # plt.plot(x_ax[epi:epi+2], axis[epi:epi+2])
+            p = np.interp(
+                ep, x_ax[epi:epi+2], axis[epi:epi+2],
+                left=axis[epi], right=axis[epi+1]
+            )
+            # plt.plot(ep, p, 'ro')
+            # plt.show()
+            return p
+
 
     @property
     def eps(self):
