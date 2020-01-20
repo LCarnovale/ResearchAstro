@@ -12,39 +12,8 @@ def init(*args):
 
     if 'big' in argv:
 
-        source = [
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_0.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_1.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_2.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_3.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_4.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_5.txt",
-            r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_6.txt",
-        ][:]
-
-        print("loading grid...")
-        with open(source[0], 'r') as f:
-            header_line = next(f)
-
-        ## Assume all rows are comma separated ##
-
-        headers = header_line.split(",")
-
-        table = np.genfromtxt(source[0], delimiter=',', skip_header=1)
-        if len(source) > 1:
-            print("1 done")
-            tables = [table]
-            for s in source[1:]:
-                new = np.genfromtxt(s, delimiter=',', skip_header=0)
-                tables.append(new)
-                print("loaded", s)
-
-            table = np.concatenate(tables)
-
-        full = {}
-
-        for i, h in enumerate(headers):
-            full[h] = table[:, i]
+        import grid.learn_grid as lg
+        full = lg.data_all
     else:
         import read_hist
         full = read_hist.get_full_cols(*args)
@@ -225,7 +194,6 @@ class TrackSet:
     @property
     def num_eps(self):
         return len(self._ep_funcs)
-
 
 def get_track_from_id(id, *extra_keys):
     """ Get a track from it's id

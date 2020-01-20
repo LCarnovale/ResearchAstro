@@ -1,73 +1,66 @@
 from os import listdir
 import numpy as np
-from numpy.lib import recfunctions as rfn
 
 
 top_path = r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\hist_grids"
 
 out = "hist_grids/alldat.txt"
 
-dirs = ['alpha', 'M', 'Y', 'Z']
-files = []
-fnames = []
-for d in dirs:
+valid_vary = ['alpha', 'M', 'Y', 'Z']
+files = {a:list() for a in valid_vary}
+# fnames = []
+for d in valid_vary:
     flist = listdir(top_path + "\\" + d)
     for f in flist:
-        if f in fnames: continue
-        fnames.append(f)
-        files.append(top_path + "\\" + d + "\\" + f)
-
-keep_headers = [
-    'star_age',# '<f8'),
-    'star_mass',# '<f8'),
-    'log_R',# '<f8'),
-    'log_Teff',# '<f8'),
-    'log_L',# '<f8')
-    'center_h1',
-]
-
-init_conds_headers = [
-    'M', 'Y', 'Z', 'alpha', 'diffusion', 'eta', 'overshoot',
-]
+        # if f in fnames: continue
+        # fnames.append(f)
+        files[d].append(top_path + "\\" + d + "\\" + f)
 
 
+def load_hist_track(vary_var, index):
+    """ Returns `(inits, data)`, a (length 1) record of initial values
+    and a (longer) record of data points."""
+    if vary_var not in valid_vary:
+        raise ValueError("vary_var was", vary_var, "but must be in", valid_vary)
 
-def get_full_cols(*additional_columns):
-    # global headers_dtypes
-    global keep_headers
-    global init_conds_headers
-    keep_headers += additional_columns
-    headers_dtypes = [(x, '<f8') for x in keep_headers]
-    headers_dtypes += [(x, '<f8') for x in init_conds_headers]
-    init_conds_headers += ['id']# just to add the id column
-    headers_dtypes += [('id', 'i4')]
+    try:
+        file = files[vary_var][index]
+        inits = np.genfromtxt(file, skip_header=1, max_rows=1, names=True)
+        inits = {k:inits[k] for k in inits.dtype.names}
+        extra_inits = file.split('\\')[-1][:-4].split('_') # split the file name
 
-    fullcols = np.zeros(0, dtype=headers_dtypes)
-    i = 1
-    keys = keep_headers + init_conds_headers
-    for file in files:
-        init_conds = file.split("\\")[-1][:-4]
-        init_conds = init_conds.split("_")
-        vals = [float(x.split("=")[1]) for x in init_conds]
-        M, Y, Z, alpha, diff, settling, eta, over = vals
+        extra_labels = ["M", "Y", "Z", "alpha", "diff", "settling", "eta", "overshoot"]
+        for init in extra_inits:
+            label, val = init.split('=')
+            inits[label] = float(val)
+
+        solar_Z = 0.01858
+        inits['feh'] = np.log10(inits['Z'] / solar_Z)
         data = np.genfromtxt(file, skip_header=5, names=True)
-        # sort the arrays
-        data = np.sort(data, order='model_number')
-        data = rfn.append_fields(data, init_conds_headers,
-            [0. for _ in init_conds_headers][:-1] + [1],
-            usemask=False)
+        data = np.sort(data, order='star_age')
+    except IndexError:
+        return None
+    except Exception as e:
+        print("Unable to load file:", file)
+        print("Error:", e)
+        return None
+    else:
+        return inits, data
 
-        data['id'] = i
-        data['M'] = M
-        data['Y'] = Y
-        data['Z'] = Z
-        data['alpha'] = alpha
-        data['diffusion'] = diff
-        data['eta'] = eta
-        data['overshoot'] = over
 
-        fullcols = np.append(fullcols[keys], data[keys])
-        i += 1
+def load_hist_all(vary_var, max=100):
+    """ Return all tracks for a given vary parameter.
 
-    # header = ','.join(keys)
-    return fullcols
+    It is not known immediately how many tracks will be found so it just keeps
+    trying to load them until it breaks, or hits `max` tracks. If it does hit max,
+    a warning is raised."""
+    out = []
+    for i in range(max):
+        new = load_hist_track(vary_var, i)
+        if new == None:
+            return out
+        else:
+            out.append(new)
+
+    raise Warning(f"Max track count reached in load_hist_all for vary_var = {vary_var}")
+    return out
