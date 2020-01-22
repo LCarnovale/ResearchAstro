@@ -10,3 +10,9 @@
 *.dat
 out_split_*
 *.sh
+*.csv
+*.txt
+*.nm
+*.gurkin
+*.json
+*.pickle

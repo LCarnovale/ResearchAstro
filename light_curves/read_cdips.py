@@ -271,8 +271,16 @@ gaiaid  : {self.gaiaid}"""
         return self._hdul[0].header['TESSMAG']
 
     @property
-    def BVMAG(self):
-        return self._hdul[0].header['TICEBMV'] # assuming this is the colour index we're looking for
+    def GMAG(self):
+        return self._hdul[0].header['phot_g_mean_mag'] # assuming this is the colour index we're looking for
+
+    @property
+    def BMAG(self):
+        return self._hdul[0].header['phot_bp_mean_mag'] # assuming this is the colour index we're looking for
+
+    @property
+    def RMAG(self):
+        return self._hdul[0].header['phot_rp_mean_mag'] # assuming this is the colour index we're looking for
 
 
 if __name__ == "__main__":

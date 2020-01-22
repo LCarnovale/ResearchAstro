@@ -7,10 +7,19 @@ from numpy.lib import recfunctions as rfn
 
 argv = sys.argv
 
+font = {'weight' : 'normal',
+# 'family' : 'normal',
+'size'   : 18}
+plt.rc('font', **font)
+plt.rc('figure', figsize=(12, 8))
+plt.rc('axes', grid=True)
+
+
 big_data_path = 'grid_dump.nm'
 meta_dump_path = 'meta.gurkin'
 
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
 
 files = [
     r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\grid\out_split_0.txt",
@@ -138,13 +147,23 @@ def get_step_from_all(step, data=None):
     Y = np.array(rows[default_output_labels].tolist())
     return X, Y
 
+def get_track_from_id(id):
+    if id not in data_all['id']:
+        id = np.unique(data_all['id'])[id]
+
+    rows = data_all[data_all['id'] == id]
+    X = np.array(rows[default_input_labels][0].tolist())
+    Y = rows[default_output_labels]
+    Y = np.array([list(x) for x in Y])
+    return X, Y
+
 
 def eval_regrs(inputs):
     """ Run the given inputs through all random forests to get a fit.
     Must fit all the forests first obviously.
 
     Returns an array of shape:
-        (<num steps/regressors>, <input samples>, <num output labels>)
+        (<num input samples>, <num steps>, <num output labels>)
 
     For a single dimensional length N input array, with NR regressors,
     and L output labels, the output will have shape (NR, 1, L).
@@ -155,7 +174,7 @@ def eval_regrs(inputs):
 
 
 
-    if regr_list == None:
+    if regr == None:
         print("Please generate the list of regressors with fit_init() before calling this.")
         return
 
@@ -163,53 +182,97 @@ def eval_regrs(inputs):
     if len(inputs.shape) == 1:
         inputs = inputs.reshape(1, -1)
 
-    out = np.zeros(shape=(len(regr_list), inputs.shape[0], len(default_output_labels)))
-    for i, r in enumerate(regr_list):
-        out[i] = r.predict(np.array(inputs.tolist()))
+    out = np.zeros(shape=(inputs.shape[0], 96, len(default_output_labels)))
 
+    for i, inp in enumerate(inputs):
+        print("Predicting:", inp)
+        temp = regr.predict(np.array(inp.tolist()).reshape(1, -1))
+        temp = temp.reshape(-1, out.shape[-1])
+        out[i] = temp[:]
     return out
 
-regr_list = None
+regr = None
 def fit_init():
-    global regr_list
+    global regr
     num_steps = 96
-    regr_list = [
-        RandomForestRegressor(
-                min_samples_leaf=50, n_estimators=200, warm_start=True,
-                n_jobs=2,
-            ) for i in range(num_steps)
-    ]
+    # regr_list = [
+    regr = RandomForestRegressor(
+        min_samples_leaf=num_steps, n_estimators=len(default_input_labels)*64,
+        warm_start=True, n_jobs=2, bootstrap=True
+    )
+    # regr = MLPRegressor(
+    #     solver='lbfgs',
+    # )
     print("Fetching training data...")
-    training_data = [get_step_from_all(i) for i in range(num_steps)]
-    # X = np.concatenate([d[0] for d in training_data])
-    # Y = np.concatenate([d[1] for d in training_data])
+    # training_data = [get_step_from_all(i) for i in range(num_steps)]
+    full_tracks = data_all['step_id'] == num_steps - 1
+    full_tracks = np.flatnonzero(full_tracks)
+    full_tracks = full_tracks.reshape(-1, 1)
+    steps = np.arange(num_steps)
+    steps -= steps[-1]
+    steps = np.tile(steps, [len(full_tracks), 1])
+    ft = full_tracks + steps # ft is just short for full tracks
+
+    X = data_all[default_input_labels][ft[:, 0]]
+    Y = data_all[default_output_labels][ft]
+    Y = Y.reshape(X.shape[0], -1)
+
+
+    # ids = np.unique(data_all['id'])
+    # training_data = [get_track_from_id(i) for i in ids]
+    # X = np.concatenate([d[0].reshape(1, -1) for d in training_data if len(d[1]) == num_steps])
+    # Y = np.concatenate([d[1].reshape(1, -1) for d in training_data if len(d[1]) == num_steps])
+
+    newX = np.zeros(shape=(len(X), len(default_input_labels)))
+    for i, l in enumerate(default_input_labels):
+        newX[:, i] = X[l]
+
+    newY = np.zeros(shape=(len(Y), len(default_output_labels) * Y.shape[-1]))
+    for i, l in enumerate(default_output_labels):
+        newY[:, i::len(default_output_labels)] = Y[l]
+        # sep = num_steps
+        # newY[:, i*sep : (i+1)*sep] = Y[l]
+
     print("Fitting...")
-    # regr.fit(X, Y)
-    # print("Done.")
+    regr.fit(newX, newY)
+    print("Done.")
 
     #
-    i = 0
-    for regr, data in zip(regr_list, training_data):
-    # for data in training_data:
-        print(f"Training step {i}...", end="\r", flush=True)
-        X, Y = data
-        # print(X)
-        # print(Y)
-        regr.fit(X, Y)
-        i += 1
-    print()
-    print("Done.")
+    # i = 0
+    # # for regr, data in zip(regr_list, training_data):
+    # # for data in training_data:
+    # for id in ids:
+    #     break
+    #     if not i%25:
+    #         print(f"Fitting track {i}...", end="\r", flush=True)
+    #     X, Y = get_track_from_id(id)
+    #     if len(Y) != num_steps:
+    #         continue
+    #     X = X.reshape(1, -1)
+    #     Y = Y.reshape(1, -1)
+    #     # print(Y[-1][-1])
+    #
+    #     # print(X)
+    #     # print(Y)
+    #     regr.fit(X, Y)
+    #     i += 1
+    #     if i > 500: break
+    # print()
+    # print("Done.")
 
 
 if __name__ == '__main__':
     fit_init()
     heavy_in = solar_inputs.copy()
-    heavy_in[0] = 1.3
-    solar_out = eval_regrs([solar_inputs, heavy_in])
-    plt.plot(solar_out[:, 0, 0], solar_out[:, :, 1])
+    heavy_in[0] = 1.2
+    inp, model = get_track_from_id(k)
+    solar_out = eval_regrs([solar_inputs, heavy_in, inp])
+    for out in solar_out:
+        plt.plot(out[:, 0], out[:, 1])
+    plt.plot(model[:, 0], model[:, 1])
     plt.gca().invert_xaxis()
     plt.title("Fitted track for solar like inputs")
-    plt.legend(["1 Solar Mass", "1.3 Solar Mass"])
+    plt.legend(["1 Solar Mass", f"{heavy_in[0]} Solar Mass", f"{inp[0]:.1f} (Predicted)" ,f"{inp[0]:.1f} Solar Mass (Model)"])
     plt.xlabel("T_eff")
     plt.ylabel("L")
     plt.show()
