@@ -19,7 +19,7 @@ table_data = np.genfromtxt(table_path, delimiter=',', names=True, comments='#', 
 
 font = {'weight' : 'normal',
 # 'family' : 'normal',
-'size'   : 25}
+'size'   : 17}
 plt.rc('font', **font)
 plt.rc('figure', figsize=(12, 8))
 plt.rc('axes', grid=True)
@@ -28,40 +28,84 @@ plt.rc('lines', markersize=10)
 # Line segment points:
 lsx1, lsy1 = 1, 2
 lsx2, lsy2 = 2, -2
-dist_limit = 0.3
+dist_limit = 0.31
 
 def get_mask(table):
     # Forst sort by decreasing magnitude
     plx = table['plx'] / 1e3
     M = table['GAIAmag'] + 5*np.log10(plx) + 5
-    M_sort = np.argsort(-M)
+    # M_sort = np.argsort(-M)
 
     bprp = table['gaiabp'] - table['gaiarp']
 
-    d = shortest_distance_to_lineseg(
-        bprp[M_sort], M[M_sort], lsx1, lsy1, lsx2, lsy2
+    d, t = shortest_distance_to_lineseg(
+        bprp, M, lsx1, lsy1, lsx2, lsy2
     )
+    t_sort = np.argsort(t)
 
-    return M_sort[d < dist_limit]
 
+    # inside = table[d < dist_limit]
 
+    return t_sort[d[t_sort] < dist_limit]
+
+def shortest_distance_to_lineseg(xdata, ydata, vx1, vy1, vx2, vy2):
+    """ Return the shortest distance from all points made by (xdata, ydata)
+    to the line segment joining (vx1, vy1) and (vx2, vy2).
+
+    xdata/ydata: Arraylike, one dimensional.
+    vXX : single scalar.
+
+    Return an array of distances, and an array of the component of all
+    points along the given line. Points closest to the beginning of the segment
+    will have values 0 in this array, points closest to the end 1, and
+    the trend is continued linearly for all points along the line.
+
+    Math taken from:
+        https://math.stackexchange.com/questions/2248617
+    """
+    d = np.zeros(xdata.size)
+    # If we parameterize the line segment by the single variable t from 0 -> 1,
+    # then we can find the value of t which corresponds to the point on the line
+    # which is closest to our point of interest:
+    t = -((vx1-xdata)*(vx2-vx1)+(vy1-ydata)*(vy2-vy1))                         \
+       / ((vx2-vx1)**2+(vy2-vy1)**2)
+    # For points where t is outside [0, 1], the closest point on the line is
+    # outside of the segement, so we use the minimum of the straight line
+    # distance to either end of the segment.
+    # Points where t is within [0, 1], we can use the perpendicular distance
+    # to the line:
+    pm = np.logical_and(t >= 0, t <= 1) # perpendicular mask
+    d[pm] = np.abs((vx2-vx1)*(vy1-ydata[pm]) - (vy2-vy1)*(vx1-xdata[pm]))      \
+          / np.sqrt((vx2-vx1)**2 + (vy2-vy1)**2)
+
+    # Distances to endpoints:
+    d1 = np.sqrt((xdata-vx1)**2 + (ydata-vy1)**2).reshape(-1, 1)
+    d2 = np.sqrt((xdata-vx2)**2 + (ydata-vy2)**2).reshape(-1, 1)
+
+    d_min = np.min(np.concatenate([d1, d2], axis=1), axis=1)
+    d[~pm] = d_min[~pm]
+
+    return d, t
 
 def get_cdips_product(star_num):
     if type(star_num) != list:
         star_num = [star_num]
 
     num_ints = [int(n) for n in star_num]
-    if num_ints[0] in table_data['MatchID']:
-        # Already have tics
-        tic_searches = [str(n) for n in num_ints]
-    else:
-        mask = get_mask(table_data)
-        print("Filtered down to", np.count_nonzero(mask), "items to index from.")
-        temp_table = table_data[mask]
-        tic_searches = temp_table['MatchID'][num_ints]
-        tic_searches = [str(int(n)) for n in tic_searches]
+    tic_searches = []
+    mask = get_mask(table_data)
+    print("Filtered down to", np.count_nonzero(mask), "items to index from.")
+    temp_table = table_data[mask]
+    num_stars = len(table_data)
+    for n in num_ints:
+        if n > num_stars:
+            # Already have tics
+            tic_searches.append(str(n))
+        else:
+            tic_searches.append(str(int(temp_table['MatchID'][n])))
+            # tic_searches = [str(int(n)) for n in tic_searches]
 
-    tic_searches = list(np.unique(tic_searches))
+    # tic_searches = list(np.unique(tic_searches))
     obs = Observations.query_criteria(target_name=tic_searches, provenance_name="CDIPS")
     print(f"TIC {tic_searches} returned {len(obs)} object(s).")
     # Get rid of duplicates across sectors
@@ -79,6 +123,8 @@ def get_cdips_product(star_num):
         for f in down:
             ft = FitsTable(f['Local Path'])
             ft_list.append(ft)
+
+        ft_list = sorted(ft_list, key=lambda x: tic_searches.index(x.ticid))
 
         return ft_list
     else:
@@ -242,13 +288,17 @@ gaiaid  : {self.gaiaid}"""
     def query_mast(self):
         """ Fetch the data for this star in astroquery.mast using the TICID
         """
-        t = Catalogs.query_criteria(target_name=self.ticid)
+        t = Catalogs.query_criteria(catalog='TIC', target_name=self.ticid)
         return t
 
 
     @property
     def cdipsref(self):
         return self._hdul[0].header['CDIPSREF']
+
+    @property
+    def cluster(self):
+        return self._hdul[0].header['CDCLSTER']
 
     @property
     def ticid(self):
@@ -265,6 +315,10 @@ gaiaid  : {self.gaiaid}"""
     @property
     def TESSmag(self):
         return self._hdul[0].header['TESSMAG']
+
+    @property
+    def plx(self):
+        return self._hdul[0].header['Parallax[mas]']
 
     @property
     def gmag(self):
@@ -289,41 +343,7 @@ gaiaid  : {self.gaiaid}"""
 # class InteractivePlotHandler:
 #     def __init__(self, fig):
 
-def shortest_distance_to_lineseg(xdata, ydata, vx1, vy1, vx2, vy2):
-    """ Return the shortest distance from all points made by (xdata, ydata)
-    to the line segment joining (vx1, vy1) and (vx2, vy2).
 
-    xdata/ydata: Arraylike, one dimensional.
-    vXX : single scalar.
-
-    Return an array of distances.
-
-    Math taken from:
-        https://math.stackexchange.com/questions/2248617
-    """
-    d = np.zeros(xdata.size)
-    # If we parameterize the line segment by the single variable t from 0 -> 1,
-    # then we can find the value of t which corresponds to the point on the line
-    # which is closest to our point of interest:
-    t = -((vx1-xdata)*(vx2-vx1)+(vy1-ydata)*(vy2-vy1))                         \
-       / ((vx2-vx1)**2+(vy2-vy1)**2)
-    # For points where t is outside [0, 1], the closest point on the line is
-    # outside of the segement, so we use the minimum of the straight line
-    # distance to either end of the segment.
-    # Points where t is within [0, 1], we can use the perpendicular distance
-    # to the line:
-    pm = np.logical_and(t >= 0, t <= 1) # perpendicular mask
-    d[pm] = np.abs((vx2-vx1)*(vy1-ydata[pm]) - (vy2-vy1)*(vx1-xdata[pm]))      \
-          / np.sqrt((vx2-vx1)**2 + (vy2-vy1)**2)
-
-    # Distances to endpoints:
-    d1 = np.sqrt((xdata-vx1)**2 + (ydata-vy1)**2).reshape(-1, 1)
-    d2 = np.sqrt((xdata-vx2)**2 + (ydata-vy2)**2).reshape(-1, 1)
-
-    d_min = np.min(np.concatenate([d1, d2], axis=1), axis=1)
-    d[~pm] = d_min[~pm]
-
-    return d
 
 
 if __name__ == '__main__':
@@ -348,47 +368,88 @@ if __name__ == '__main__':
     M = table_data['GAIAmag'][nan_mask] + 5*np.log10(plx) + 5
 
 
-    for f in fts:
+    fig = plt.figure(f"All plots")
+    ncurves = len(fts)
+    nrows = ((ncurves-1)//5 + 1)
+    ncols = (ncurves + nrows//2) // nrows
+    axes = fig.subplots(nrows=2*nrows, ncols=ncols)
+    if ncurves == 1:
+        axes = axes.reshape(-1, 1)
+    pg_axes = axes[::2, :].flatten()
+    hr_axes = axes[1::2, :].flatten()
+
+    row_i = 0
+    col_i = 0
+    for pg_ax, hr_ax, f in zip(pg_axes, hr_axes, fts):
         print(f"Plotting TIC {f.ticid}")
-        fig = plt.figure(f"TIC {f.ticid}")
-        gs = GridSpec(nrows=2, ncols=2, figure=fig)
-        lc_ax = fig.add_subplot(gs[0, :])
-        ps_ax = fig.add_subplot(gs[1, 0])
-        hr_ax = fig.add_subplot(gs[1, 1])
-        lc_ax.set_title(f"Light Curves for TFA/PCA Detrending for TIC {f.ticid}")
-        lc_ax.set_xlabel("Time (days)")
-        lc_ax.set_ylabel("Mag")
+        left_col = col_i == 0
+        top_row = row_i == 0
+        bottom_row = row_i == nrows-1
+
         lc_tfa = f.get_lc('tfa', ap=3, clip=3)
         lc_pca = f.get_lc('pca', ap=3, clip=3)
-        lc_ax.plot(lc_pca.time, lc_pca.flux, label='PCA')
-        lc_ax.plot(lc_tfa.time, lc_tfa.flux, label='TFA')
-        lc_ax.invert_yaxis()
-        lc_ax.legend()
+        if ncurves == 1:
+            bottom_row = top_row = left_col = True
+            plt.close(fig)
+            fig = plt.figure(f"Light Curve for TIC {f.ticid}")
+            gs = GridSpec(nrows=2, ncols=2, figure=fig)
+            lc_ax = fig.add_subplot(gs[0, :])
+            pg_ax = fig.add_subplot(gs[1, 0])
+            hr_ax = fig.add_subplot(gs[1, 1])
+            lc_ax.set_title(f"Light Curves for TFA/PCA Detrending for TIC {f.ticid}")
+            lc_ax.set_xlabel("Time (days)")
+            lc_ax.set_ylabel("Mag")
+            lc_ax.plot(lc_pca.time, lc_pca.flux, label='PCA')
+            lc_ax.plot(lc_tfa.time, lc_tfa.flux, label='TFA')
+            lc_ax.invert_yaxis()
+            lc_ax.legend()
 
         pg_tfa = lc_tfa.to_periodogram(freq_unit=u.microhertz)
         pg_pca = lc_pca.to_periodogram(freq_unit=u.microhertz)
-        ps_ax.set_title("Power spectrum for TFA/PCA Light Curves")
-        ps_ax.set_xlabel(r"Frequency ($\mu Hz$)")
-        ps_ax.set_ylabel("Power")
-        ps_ax.set_ylim(0.8e-5, 100e-5)
-        ps_ax.set_xlim(2, 100)
-        ps_ax.loglog(pg_pca.frequency, pg_pca.power, label='PCA')
-        ps_ax.loglog(pg_tfa.frequency, pg_tfa.power, label='TFA')
-        ps_ax.legend()
+        # pg_ax.set_title("Power spectrum for TFA/PCA Light Curves")
+        pg_ax.set_ylim(0.8e-5, 100e-5)
+        pg_ax.set_xlim(2, 100)
+        pg_ax.loglog(pg_pca.frequency, pg_pca.power, label='PCA')
+        pg_ax.loglog(pg_tfa.frequency, pg_tfa.power, label='TFA')
+        pg_ax.legend()
 
-        hr_ax.set_title("Mag-Colour plot of target and dataset")
-        hr_ax.set_xlabel(r"$G_{Bp} - G_{Rp}$")
-        hr_ax.set_ylabel(r"$M_\omega = G + 5 \log_{10}(\omega_{as}) + 5$")
+        # hr_ax.set_title("Mag-Colour plot of target and dataset")
         sub_mask = get_mask(table_data)
         hr_ax.plot(bprp, M, 'k.', label='All Stars')
         hr_ax.plot(bprp[sub_mask], M[sub_mask], 'b.', label='Subselection')
         mask = table_data[nan_mask]['MatchID'] == int(f.ticid)
-        hr_ax.plot(bprp[mask], M[mask], 'ro', label=f'TIC {f.ticid}')
+        if mask.any():
+            hr_ax.plot(bprp[mask], M[mask], 'ro', label=f'TIC {f.ticid}')
+        else:
+            f_bprp = f.bmag - f.rmag
+            f_M = f.gmag + 5*np.log10(f.plx) + 5
+            hr_ax.plot(f_bprp, f_M, 'ro', label=f'TIC {f.ticid}')
+        hr_ax.annotate(f.cluster, xy=(5,-4.5), ha='right')
+
         hr_ax.invert_yaxis()
         hr_ax.legend()
-        mng = plt.get_current_fig_manager()
-        mng.window.setVisible(False)
-        mng.window.showMaximized()
+
+        if left_col:
+            pg_ax.set_ylabel("Power")
+            hr_ax.set_ylabel(r"$M_\omega = G + 5 \log_{10}(\omega_{as}) + 5$")
+        if bottom_row:
+            hr_ax.set_xlabel(r"$G_{Bp} - G_{Rp}$")
+        if top_row:
+            pg_ax.set_xlabel(r"Frequency ($\mu Hz$)")
+            if ncurves > 1:
+                pg_ax.xaxis.set_label_position('top')
+
+
+        col_i += 1
+        if col_i == ncols:
+            col_i = 0
+            row_i += 1
+
+    fig.suptitle("Power Spectra and HR Plots")
+
+    mng = plt.get_current_fig_manager()
+    mng.window.setVisible(False)
+    mng.window.showMaximized()
     plt.show()
 
 

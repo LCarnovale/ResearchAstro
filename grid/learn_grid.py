@@ -5,6 +5,8 @@ from tracks import *
 import pickle
 from numpy.lib import recfunctions as rfn
 
+from matplotlib.widgets import Slider, Button, RadioButtons
+
 argv = sys.argv
 
 font = {'weight' : 'normal',
@@ -33,7 +35,7 @@ files = [
 
 default_input_labels = [
     'M', 'Y', 'Z', 'alpha',
-    'diffusion', 'settling'
+    'diffusion', 'settling', 'overshoot'
 ]
 
 solar_inputs = np.array([
@@ -42,7 +44,7 @@ solar_inputs = np.array([
 ])[:len(default_input_labels)]
 
 default_output_labels = [
-    'Teff', 'L', 'radius', 'nu_max',
+    'Teff', 'L',
     # 'age', 'mass_cc', 'h_exh_core_mass', 'h_exh_core_radius',
     # 'radius_cc', 'mass_X', 'mass_Y', 'log_LH', 'log_LHe',
     # 'log_center_T', 'log_center_Rho', 'log_center_P', 'center_mu',
@@ -185,7 +187,6 @@ def eval_regrs(inputs):
     out = np.zeros(shape=(inputs.shape[0], 96, len(default_output_labels)))
 
     for i, inp in enumerate(inputs):
-        print("Predicting:", inp)
         temp = regr.predict(np.array(inp.tolist()).reshape(1, -1))
         temp = temp.reshape(-1, out.shape[-1])
         out[i] = temp[:]
@@ -197,8 +198,8 @@ def fit_init():
     num_steps = 96
     # regr_list = [
     regr = RandomForestRegressor(
-        min_samples_leaf=num_steps, n_estimators=len(default_input_labels)*64,
-        warm_start=True, n_jobs=2, bootstrap=True
+        min_samples_leaf=1, n_estimators=len(default_input_labels)*128,
+        warm_start=True, n_jobs=-1, bootstrap=True,
     )
     # regr = MLPRegressor(
     #     solver='lbfgs',
@@ -218,11 +219,6 @@ def fit_init():
     Y = Y.reshape(X.shape[0], -1)
 
 
-    # ids = np.unique(data_all['id'])
-    # training_data = [get_track_from_id(i) for i in ids]
-    # X = np.concatenate([d[0].reshape(1, -1) for d in training_data if len(d[1]) == num_steps])
-    # Y = np.concatenate([d[1].reshape(1, -1) for d in training_data if len(d[1]) == num_steps])
-
     newX = np.zeros(shape=(len(X), len(default_input_labels)))
     for i, l in enumerate(default_input_labels):
         newX[:, i] = X[l]
@@ -237,42 +233,76 @@ def fit_init():
     regr.fit(newX, newY)
     print("Done.")
 
-    #
-    # i = 0
-    # # for regr, data in zip(regr_list, training_data):
-    # # for data in training_data:
-    # for id in ids:
-    #     break
-    #     if not i%25:
-    #         print(f"Fitting track {i}...", end="\r", flush=True)
-    #     X, Y = get_track_from_id(id)
-    #     if len(Y) != num_steps:
-    #         continue
-    #     X = X.reshape(1, -1)
-    #     Y = Y.reshape(1, -1)
-    #     # print(Y[-1][-1])
-    #
-    #     # print(X)
-    #     # print(Y)
-    #     regr.fit(X, Y)
-    #     i += 1
-    #     if i > 500: break
-    # print()
-    # print("Done.")
-
 
 if __name__ == '__main__':
     fit_init()
-    heavy_in = solar_inputs.copy()
-    heavy_in[0] = 1.2
-    inp, model = get_track_from_id(k)
-    solar_out = eval_regrs([solar_inputs, heavy_in, inp])
-    for out in solar_out:
-        plt.plot(out[:, 0], out[:, 1])
-    plt.plot(model[:, 0], model[:, 1])
-    plt.gca().invert_xaxis()
-    plt.title("Fitted track for solar like inputs")
-    plt.legend(["1 Solar Mass", f"{heavy_in[0]} Solar Mass", f"{inp[0]:.1f} (Predicted)" ,f"{inp[0]:.1f} Solar Mass (Model)"])
-    plt.xlabel("T_eff")
-    plt.ylabel("L")
+    fig = plt.figure("Interpolated Tracks")
+    plt.subplots_adjust(bottom=0.15 + .05*len(default_input_labels))
+    ax = fig.subplots()
+    axcolor = 'lightgoldenrodyellow'
+
+    def update(val):
+        new_inp = np.array([s.val for s in sliders])
+        print("Custom track values:", new_inp.round(3), end='\r', flush=True)
+        track = eval_regrs([new_inp])[0]
+        l.set_xdata(track[:, 0])
+        l.set_ydata(track[:, 1])
+        fig.canvas.draw_idle()
+
+    btn_ax = fig.add_axes([0.8, 0.1, 0.06, 0.03])
+    btn = Button(btn_ax, 'Set to Real', color=axcolor, hovercolor='0.975')
+    def match_real(event):
+        for s, v in zip(sliders, real_inp):
+            s.set_val(v)
+
+    btn.on_clicked(match_real)
+
+    sliders = []
+    for i, l in enumerate(default_input_labels):
+        new_ax = fig.add_axes([0.1, 0.1 + 0.05*i, 0.65, 0.03], facecolor=axcolor)
+        vinit = solar_inputs[i]
+        vmin = np.min(data_all[l])
+        vmax = np.max(data_all[l])
+        s = Slider(new_ax, l, vmin, vmax, valinit=vinit)
+        s.on_changed(update)
+        sliders.append(s)
+
+    # s_M = Slider(ax_M, 'Mass', 0.5, 2, valinit=1)
+    # s_Y = Slider(ax_Y, 'Y', 0, 0.3, valinit=solar_inputs[1])
+
+    # a0 = solar_inputs[3]
+    # s_alpha = Slider(ax_alpha, r'$\alpha$', a0-1, a0+2, valinit=a0)
+    inputs = solar_inputs
+    track = eval_regrs([solar_inputs])[0]
+    l, = ax.plot(track[:, 0], track[:, 1], label='Custom')
+    # solar like stars: [3805, 3438, 4609, 3149, 6219, 6818, 2364, 4492, 2967, 1628]
+    real_inp, real_out = get_track_from_id(3805)
+    ax.loglog(real_out[:, 0], real_out[:, 1], label=fr"Real track")
+    ax.invert_xaxis()
+
+    print("Input parameters   :", np.asarray(default_input_labels))
+    print("Real track values  :", real_inp.round(3))
+    print("Custom track values:", solar_inputs, end='\r', flush=True)
+
+
+    ax.legend()
     plt.show()
+
+
+
+
+
+
+    # heavy_in = solar_inputs.copy()
+    # heavy_in[0] = 1.2
+    # inp, model = get_track_from_id(k)
+    # solar_out = eval_regrs([solar_inputs, heavy_in, inp])
+    # for out in solar_out:
+    #     plt.plot(out[:, 0], out[:, 1])
+    # ax.plot(model[:, 0], model[:, 1])
+    # ax.invert_xaxis()
+    # ax.set_title("Fitted track for solar like inputs")
+    # ax.set_xlabel("T_eff")
+    # ax.set_ylabel("L")
+    # ax.legend(["1 Solar Mass", f"{heavy_in[0]} Solar Mass", f"{inp[0]:.1f} (Predicted)" ,f"{inp[0]:.1f} Solar Mass (Model)"])
+    # plt.show()
