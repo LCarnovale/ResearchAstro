@@ -69,12 +69,12 @@ class Track:
 
 
 class TrackSet:
-    def __init__(self, *tracks):
-        self._tracks = tracks
-        self._eps = [list() for _ in tracks]
-        self._ep_funcs = []
-        self._ylabel = 'log_L'
-        self._xlabel = 'log_Teff'
+    def __init__(self, *tracks, ylabel='log_L', xlabel='log_Teff'):
+        self._tracks = [*tracks]
+        self._eps = [list() for _ in tracks] # Holds the output of ep funcs
+        self._ep_funcs = []                  # Holds the ep funcs
+        self._ylabel = ylabel
+        self._xlabel = xlabel
         self._ep_labels = []
 
     def __iter__(self):
@@ -82,6 +82,13 @@ class TrackSet:
 
     def __getitem__(self, item):
         return self._tracks[item]
+
+    def __getattr__(self, attr):
+        if attr in self._ep_labels:
+            ep_index = self._ep_labels.index(attr)
+            return [self.get_ep_point(t, ep_index) for t in self.tracks_range]
+
+        raise AttributeError(f"Invalid attribute: {attr}")
 
     def __len__(self):
         """ Get the number of tracks in this set """
@@ -99,15 +106,21 @@ class TrackSet:
         """
         self._xlabel = label
 
-    def create_cols(self, func, label):
-        """ Run a function on all tracks to create a new column on each track
-        and label it with the given `label`.
 
-        func: func(track) -> array
+    def create_cols(self, func, label):
+        """ Run a function on all current tracks to create a new column or multiple
+        new columns on each track,
+        and label it/them with the given `label(s)`.
+
+        func: func(track) -> array or [array, ...]
         *len(track) and len(array) must be equal.
         """
         for t in self:
-            t.__setattr__(label, func(t))
+            cols = listify(func(t))
+            label = listify(label)
+            for c, l in zip(cols, label):
+                t.__setattr__(l, c)
+
 
     def add_ep_func(self, func, label=None):
         """ Add a function to find ep (evolution points) points on tracks.
@@ -118,7 +131,9 @@ class TrackSet:
         func: func(track) -> index(s) location in track.
         *the indexes can be floats, and the points will be interpolated.
 
-        label: Optional label for the ep. Can be retrieved with TrackSet.ep_labels.
+        label: Optional label for the ep. Can be retrieved with self.ep_labels.
+        If a label is provided, the n'th track's ep can also be
+        retrieved with self.<label>[n].
         """
         for ep, t in zip(self._eps, self._tracks):
             ep += listify(func(t))
@@ -132,20 +147,27 @@ class TrackSet:
     def add_track(self, track):
         """ Add a track to the trackset. Any ep functions attached to this set
         will be run on the added track.
+
+        Returns the index of the track added.
         """
+        new_idx = len(self._tracks)
         self._tracks.append(track)
         eps = []
         for f in self._ep_funcs:
             eps += listify(f(track))
 
         self._eps.append(eps)
+        return new_idx
 
     def get_ep_point(self, track_index, ep_index):
         """ Get a (X, Y) point for a track's ep point.
 
         track_index: the track number in this set.
-        ep_index: the ep number for the track
+        ep_index: the ep number for the track, or the label if it exists.
         """
+        if ep_index in self._ep_labels:
+            ep_index = self._ep_labels.index(ep_index)
+
         t = self._tracks[track_index]
         X = t[self.xlabel]
         Y = t[self.ylabel]
@@ -192,6 +214,25 @@ class TrackSet:
             )
             return p
 
+    def delete_all_tracks(self):
+        """ Delete all tracks and ep points, but keep ep functions and labels.
+        """
+        self._tracks = []
+        self._eps = []
+        # leave the funcs and labels
+
+    # def delete_tracks(self, to_delete):
+    #     """ Delete tracks with the given indexes. This will probably
+    #     mess up any references to track indexes in this trackset.
+    #     """
+
+    @property
+    def tracks_enum(self):
+        return enumerate(self._tracks)
+
+    @property
+    def tracks_range(self):
+        return range(len(self._tracks))
 
     @property
     def eps(self):

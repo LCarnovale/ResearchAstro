@@ -16,3 +16,5 @@ out_split_*
 *.gurkin
 *.json
 *.pickle
+*isoz*
+summary/

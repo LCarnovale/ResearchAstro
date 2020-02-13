@@ -4,6 +4,7 @@ from matplotlib.gridspec import GridSpec
 from astropy.io import fits
 import lightkurve as lk
 from astropy import units as u
+from astropy.coordinates import SkyCoord
 import pickle
 from sys import argv
 import sys
@@ -13,8 +14,46 @@ from astroquery.mast import Catalogs
 table_path = r"C:\Users\Leo\OneDrive - UNSW\Uni\ResearchStello\light_curves\MAST_Crossmatch_TIC_no_Nans_cs.csv"
 time_name = "TMID_BJD" # Exp mid-time in BJD_TDB (BJDCORR applied)
 
+# 126275079 140538401 126544393 126273786 140330119 140538877 126781167 140539089 140538926 140539108 126544385 140538994
 
 table_data = np.genfromtxt(table_path, delimiter=',', names=True, comments='#', skip_header=4)
+
+def gen_dist_mat(coords):
+    """ For 2d input array of shape (N, d),
+    Return a difference matrix of shape (N, N, d) and
+    a distance matrix of shape (N, N).
+    """
+    N = len(coords)
+    pos_all = np.tile(coords, (N, 1, 1))
+    pos_s   = np.tile(coords, (1, 1, N)).reshape(pos_all.shape)
+
+    diff = pos_all - pos_s
+    dist = np.linalg.norm(diff, 2, axis=-1)
+
+    return diff, dist
+
+cluster_coords = ['ra', 'dec', 'plx']
+if 'cluster' in argv:
+    max_dist = 2
+    if len(argv) < 3:
+        print("Give an index to select a cluster.")
+    print("Searching for clusters by:", cluster_coords)
+    coords = np.array([list(x) for x in table_data[cluster_coords]])
+    diff, dist = gen_dist_mat(coords)
+    try:
+        max_dist = float(argv[3])
+    except:
+        print("Using default max distance of", max_dist)
+
+    dist_sort = np.argsort(dist, axis=1) # Sorts each star by closest to furthest,
+                                         # for each star. (N x N array)
+    clust_mems = dist < max_dist
+    clust_mem_counts = np.count_nonzero(clust_mems, axis=1)
+    dist_sort_list = [row[:count] for (row, count) in zip(dist_sort, clust_mem_counts)]
+
+
+
+
 
 
 font = {'weight' : 'normal',
@@ -41,7 +80,7 @@ def get_mask(table):
     d, t = shortest_distance_to_lineseg(
         bprp, M, lsx1, lsy1, lsx2, lsy2
     )
-    t_sort = np.argsort(t)
+    t_sort = np.argsort(table['Tmag'])
 
 
     # inside = table[d < dist_limit]
@@ -87,9 +126,17 @@ def shortest_distance_to_lineseg(xdata, ydata, vx1, vy1, vx2, vy2):
 
     return d, t
 
+index_provided = False
 def get_cdips_product(star_num):
+    """ Given a list of numbers or a single number,
+    return the same number of FitsTable objects.
+
+    Given values can be TIC ids or indexes, the latter will be used to index
+
+    """
+    global index_provided
     if type(star_num) != list:
-        star_num = [star_num]
+        star_num = list(star_num)
 
     num_ints = [int(n) for n in star_num]
     tic_searches = []
@@ -102,10 +149,9 @@ def get_cdips_product(star_num):
             # Already have tics
             tic_searches.append(str(n))
         else:
+            if not index_provided: index_provided = True
             tic_searches.append(str(int(temp_table['MatchID'][n])))
-            # tic_searches = [str(int(n)) for n in tic_searches]
 
-    # tic_searches = list(np.unique(tic_searches))
     obs = Observations.query_criteria(target_name=tic_searches, provenance_name="CDIPS")
     print(f"TIC {tic_searches} returned {len(obs)} object(s).")
     # Get rid of duplicates across sectors
@@ -130,27 +176,6 @@ def get_cdips_product(star_num):
     else:
         return
 
-
-
-# def get_fits(sector, cam, ccd, gaiaid):
-#     """ Return an opened fits file with the given source properties.
-#     `gaiaid` can either be the actual id (a string) or an integer
-#     index which will be given to the avail_fits index to lookup the desired
-#     id string.
-#     """
-#
-#     if type(gaiaid) == int:
-#         try:
-#             gaiaid = avail_fits[sector][cam][ccd][gaiaid]
-#         except KeyError:
-#             raise KeyError(f"index[{sector}][{cam}][{ccd}][{gaiaid}] does not exist.")
-
-    #
-    # sector_str = f"{sector:0>4}"
-    # cam_str = f"cam{cam}_ccd{ccd}"
-    # filename = get_obs_id(sector, cam, ccd, gaiaid) + ".fits"
-    #
-    # path = rf"{data_folder}\s{sector_str}\{cam_str}\{filename}"
 def get_fits_from_path(path):
     try:
         hdul = fits.open(path)
@@ -170,9 +195,6 @@ def sigma_clip(data, max_sigma):
     diff = data - mn
     sigmas = diff / std
     mask = np.abs(sigmas) < max_sigma
-    print(
-    f"After clipping: {np.count_nonzero(mask)} out of {len(data)} remain within \
-{max_sigma} sigma (1 std = {std:.3f}) from a mean of {mn:.3f}")
     return mask
 
 
@@ -189,13 +211,17 @@ class FitsTable:
 
 
     def __str__(self):
-        return f"""sector  : {self.sector}
-camera  : {self.cam}
-chip/ccd: {self.ccd}
-gaiaid  : {self.gaiaid}"""
+        return repr(self)
 
     def __repr__(self):
         return f"FitsTable(...{self._path[-40:]})"
+
+    def __getattr__(self, attr):
+        try:
+            row = table_data[table_data['MatchID'] == int(self.ticid)][0]
+            return row[attr]
+        except:
+            raise AttributeError("Unkown/Invalid attribute: " + attr)
 
     def close(self):
         if self._open:
@@ -223,10 +249,6 @@ gaiaid  : {self.gaiaid}"""
             mag = mag[msk]
 
         return mag
-
-    # def get_tfa_mag(self, ap=1):
-    #     # ap (aperture) can be 1, 2 or 3
-    #     return self._data[f'TFA{ap}'].copy()
 
     def get_time_ax(self, zero_start=True):
         """ Get the time axis for magnitude measurements.
@@ -267,15 +289,6 @@ gaiaid  : {self.gaiaid}"""
             lc = lk.LightCurve(time=t_ax, flux=flux)
             lcs[ap] = lc
         return lc
-
-    # def get_tfa_lc(self, type, ap=1, clip=None):
-
-    #     if ap in self._tfa_lcs:
-    #         lc = self._tfa_lcs[ap]
-    #     else:
-    #         lc = lk.LightCurve(time=self.get_time_ax(), flux=self.get_tfa_mag(ap))
-    #         self._tfa_lcs[ap] = lc
-    #     return lc
 
     def get_ft(self, source_type, ap=1, clip=None, force_recalc=False):
         lc = self.get_lc(source_type, ap, clip, force_recalc)
@@ -334,7 +347,7 @@ gaiaid  : {self.gaiaid}"""
 
     @property
     def Teff(self):
-        return self._hdul[0].header['teff_value']
+        return self._hdul[0].header['teff_val']
 
     @property
     def lum(self):
@@ -347,6 +360,7 @@ gaiaid  : {self.gaiaid}"""
 
 
 if __name__ == '__main__':
+    # plt.ion()
     ids = []
     for s in argv:
         try:
@@ -355,7 +369,11 @@ if __name__ == '__main__':
         except:
             continue
 
-    fts = get_cdips_product(ids)
+    if not ids:
+        print("Provide ids to search for CDIPS products.")
+        exit()
+    else:
+        fts = get_cdips_product(ids)
 
     if not fts:
         print("None found.")
@@ -380,7 +398,29 @@ if __name__ == '__main__':
 
     row_i = 0
     col_i = 0
-    for pg_ax, hr_ax, f in zip(pg_axes, hr_axes, fts):
+    # if 'cluster' in argv or True:
+    bprp_selection = np.array([f.bmag - f.rmag for f in fts])
+    M_selecion = np.array([f.gmag+5*np.log10(f.plx/1e3)+5 for f in fts])
+    sub_mask = get_mask(table_data)
+
+    # For clusters:
+    sort = np.argsort([f.bmag-f.rmag for f in fts])
+    fts = [fts[i] for i in sort]
+    M_selecion = M_selecion[sort]
+    bprp_selection = bprp_selection[sort]
+
+    # chckbox_ax = fig.add_axes([0.1, 0.95, 0.02, 0.02])
+
+
+
+    while len(fts) < len(pg_axes):
+        fts.append(None)
+
+    for i, (pg_ax, hr_ax, f) in enumerate(zip(pg_axes, hr_axes, fts)):
+        if f is None:
+            fig.delaxes(pg_ax)
+            fig.delaxes(hr_ax)
+            continue
         print(f"Plotting TIC {f.ticid}")
         left_col = col_i == 0
         top_row = row_i == 0
@@ -409,29 +449,38 @@ if __name__ == '__main__':
         # pg_ax.set_title("Power spectrum for TFA/PCA Light Curves")
         pg_ax.set_ylim(0.8e-5, 100e-5)
         pg_ax.set_xlim(2, 100)
-        pg_ax.loglog(pg_pca.frequency, pg_pca.power, label='PCA')
+        pg_ax.plot(pg_pca.frequency, pg_pca.power, label='PCA')
         pg_ax.loglog(pg_tfa.frequency, pg_tfa.power, label='TFA')
         pg_ax.legend()
 
         # hr_ax.set_title("Mag-Colour plot of target and dataset")
-        sub_mask = get_mask(table_data)
-        hr_ax.plot(bprp, M, 'k.', label='All Stars')
-        hr_ax.plot(bprp[sub_mask], M[sub_mask], 'b.', label='Subselection')
-        mask = table_data[nan_mask]['MatchID'] == int(f.ticid)
-        if mask.any():
-            hr_ax.plot(bprp[mask], M[mask], 'ro', label=f'TIC {f.ticid}')
-        else:
-            f_bprp = f.bmag - f.rmag
-            f_M = f.gmag + 5*np.log10(f.plx) + 5
-            hr_ax.plot(f_bprp, f_M, 'ro', label=f'TIC {f.ticid}')
-        hr_ax.annotate(f.cluster, xy=(5,-4.5), ha='right')
+        hr_ax.plot(bprp, M, 'k.', label='All Stars', markersize=5)
+        if index_provided:
+            hr_ax.plot(bprp[sub_mask], M[sub_mask], 'b.', label='Indexed region')
+        hr_ax.plot(bprp_selection, M_selecion, 'go', label='Selection')
+        hr_ax.plot(bprp_selection[i], M_selecion[i], 'ro', label=f'TIC {f.ticid}')
+        # For NGC 2446 plots:
+        # if True:
+        #     hr_ax.set_xlim(0.93, 1.71)
+        #     hr_ax.set_ylim(-3.24, 1.11)
+            # if bprp_selection[i] > 1.3:
+            #     pg_ax.axvline(80, color='k')
+            # else:
+            #     pg_ax.axvline(25, color='k')
+        # mask = table_data[nan_mask]['MatchID'] == int(f.ticid)
+        hr_ax.annotate(f"{f.cluster}", xy=(0.99,0.90), ha='right', xycoords='axes fraction')
+        hr_ax.annotate(
+            f"TMAG {f.TESSmag:.2f}\nTIC {f.ticid}", xy=(0.99, 0.01),
+            ha='right', xycoords='axes fraction'
+        )
+
 
         hr_ax.invert_yaxis()
-        hr_ax.legend()
+        # hr_ax.legend()
 
         if left_col:
             pg_ax.set_ylabel("Power")
-            hr_ax.set_ylabel(r"$M_\omega = G + 5 \log_{10}(\omega_{as}) + 5$")
+            hr_ax.set_ylabel(r"$M_\omega = G + 5 \log_{10}(\omega_{as}) + 5$" + "\n")
         if bottom_row:
             hr_ax.set_xlabel(r"$G_{Bp} - G_{Rp}$")
         if top_row:
